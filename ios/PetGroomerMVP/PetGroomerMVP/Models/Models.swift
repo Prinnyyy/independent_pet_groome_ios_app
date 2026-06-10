@@ -75,6 +75,100 @@ struct PetPhoto: Identifiable, Codable, Hashable {
     var createdAt: Date
 }
 
+enum GroomingTaskService: String, Codable, CaseIterable, Identifiable {
+    case bath = "Bath"
+    case fullGroom = "Full groom"
+    case haircut = "Haircut"
+    case nailTrim = "Nail trim"
+    case dematting = "De-matting"
+    case catGrooming = "Cat grooming"
+    case faceTrim = "Face trim"
+    case sanitaryTrim = "Sanitary trim"
+
+    var id: String { rawValue }
+}
+
+enum GroomingTaskTimeWindow: String, Codable, CaseIterable, Identifiable {
+    case before8AM = "before_8_am"
+    case eightAM = "8_am"
+    case nineAM = "9_am"
+    case tenAM = "10_am"
+    case elevenAM = "11_am"
+    case noon = "12_pm"
+    case onePM = "1_pm"
+    case twoPM = "2_pm"
+    case threePM = "3_pm"
+    case fourPM = "4_pm"
+    case fivePM = "5_pm"
+    case after5PM = "after_5_pm"
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .before8AM: "Before 8:00 AM"
+        case .eightAM: "8:00 AM"
+        case .nineAM: "9:00 AM"
+        case .tenAM: "10:00 AM"
+        case .elevenAM: "11:00 AM"
+        case .noon: "12:00 PM"
+        case .onePM: "1:00 PM"
+        case .twoPM: "2:00 PM"
+        case .threePM: "3:00 PM"
+        case .fourPM: "4:00 PM"
+        case .fivePM: "5:00 PM"
+        case .after5PM: "After 5:00 PM"
+        }
+    }
+}
+
+enum GroomingTaskStyleReferenceSource: String, Codable, CaseIterable, Identifiable, Hashable {
+    case camera = "camera"
+    case photoLibrary = "photo_library"
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .camera: "Camera style photo attached"
+        case .photoLibrary: "Uploaded style photo attached"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .camera: "camera.fill"
+        case .photoLibrary: "photo.fill.on.rectangle.fill"
+        }
+    }
+}
+
+struct GroomingTask: Identifiable, Codable, Hashable {
+    let id: UUID
+    var userID: UUID
+    var petID: UUID
+    var service: GroomingTaskService
+    var targetDate: Date
+    var timeWindow: GroomingTaskTimeWindow
+    var styleGoal: String
+    var specialNotes: String
+    var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var createdAt: Date
+}
+
+struct GroomingTaskTemplate: Identifiable, Codable, Hashable {
+    let id: UUID
+    var userID: UUID
+    var name: String
+    var petID: UUID
+    var service: GroomingTaskService
+    var timeWindow: GroomingTaskTimeWindow
+    var styleGoal: String
+    var specialNotes: String
+    var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var createdAt: Date
+}
+
 struct Groomer: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String

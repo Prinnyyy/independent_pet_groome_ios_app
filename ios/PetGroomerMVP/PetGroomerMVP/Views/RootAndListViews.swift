@@ -59,6 +59,39 @@ struct RootView: View {
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showNewPet = false
+    @State private var selectedPetIndex = 0
+    @State private var selectedService: GroomingTaskService = .bath
+    @State private var selectedDate = Date()
+    @State private var selectedTimeWindow: GroomingTaskTimeWindow = .eightAM
+    @State private var styleGoal = ""
+    @State private var specialNotes = ""
+    @State private var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    @State private var isEditingTask = true
+    @State private var templateSaved = false
+    @State private var showStyleReferenceOptions = false
+    @State private var showTemplatePicker = false
+    @State private var showNoTemplatesAlert = false
+    @State private var showTemplateSavedAlert = false
+
+    private var selectedPet: Pet? {
+        guard model.pets.indices.contains(selectedPetIndex) else { return model.pets.first }
+        return model.pets[selectedPetIndex]
+    }
+
+    private var todayStart: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private var validTaskDateRange: ClosedRange<Date> {
+        todayStart...Date.distantFuture
+    }
+
+    private var groomerResults: [Groomer] {
+        if let task = model.currentGroomingTask {
+            return model.recommendedGroomers(for: task)
+        }
+        return Array(model.groomers.prefix(2))
+    }
 
     var body: some View {
         ScrollView {
@@ -68,31 +101,11 @@ struct HomeView: View {
                     subtitle: "Compare real portfolios, pet-fit details, price ranges, and direct contact options."
                 )
 
-                VStack(spacing: 10) {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(PetTheme.coral)
-                        Text("Today’s grooming task")
-                            .font(.headline.weight(.semibold))
-                            .fontDesign(.rounded)
-                        Spacer()
-                    }
-                    Text(model.pets.isEmpty ? "Create a pet profile so groomers can estimate coat condition, size, temperament, and service fit." : "Use \(model.pets[0].name)'s profile to request clear pricing and availability from a matching groomer.")
-                        .font(.subheadline)
-                        .foregroundStyle(PetTheme.muted)
-                    Button {
-                        showNewPet = true
-                    } label: {
-                        Label(model.pets.isEmpty ? "Create pet profile" : "Update pet profile", systemImage: "plus.circle.fill")
-                    }
-                    .buttonStyle(CoralButtonStyle())
-                }
-                .taskCard()
-                .padding(.horizontal, 18)
+                groomingTaskBuilder
 
-                SectionHeader(title: "Nearby groomers")
+                SectionHeader(title: model.currentGroomingTask == nil ? "Nearby groomers" : "Recommended for this task")
                 VStack(spacing: 14) {
-                    ForEach(model.groomers.prefix(2)) { groomer in
+                    ForEach(groomerResults) { groomer in
                         NavigationLink {
                             GroomerProfileView(groomer: groomer)
                         } label: {
@@ -135,6 +148,352 @@ struct HomeView: View {
         .sheet(isPresented: $showNewPet) {
             PetEditorView(mode: .create)
                 .environmentObject(model)
+        }
+        .onChange(of: model.pets.count) { _, _ in
+            if selectedPetIndex >= model.pets.count {
+                selectedPetIndex = max(0, model.pets.count - 1)
+            }
+        }
+        .onAppear {
+            if selectedDate < todayStart {
+                selectedDate = todayStart
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var groomingTaskBuilder: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "clipboard.badge.plus")
+                    .foregroundStyle(PetTheme.coral)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Build today’s grooming task")
+                        .font(.headline.weight(.semibold))
+                        .fontDesign(.rounded)
+                    Text("Create a clear task card before choosing a groomer.")
+                        .font(.caption)
+                        .foregroundStyle(PetTheme.muted)
+                }
+                Spacer()
+                Button {
+                    if model.savedGroomingTaskTemplates.isEmpty {
+                        showNoTemplatesAlert = true
+                    } else {
+                        showTemplatePicker = true
+                    }
+                } label: {
+                    Label("Templates", systemImage: "bookmark")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(QuietButtonStyle())
+                .accessibilityLabel("Choose a saved task template")
+            }
+
+            if model.pets.isEmpty {
+                Text("Create a pet profile first so this task can use your pet list.")
+                    .font(.subheadline)
+                    .foregroundStyle(PetTheme.muted)
+                Button {
+                    showNewPet = true
+                } label: {
+                    Label("Create pet profile", systemImage: "plus.circle.fill")
+                }
+                .buttonStyle(CoralButtonStyle())
+            } else if let task = model.currentGroomingTask, let pet = model.pet(for: task), !isEditingTask {
+                GroomingTaskCard(
+                    task: task,
+                    pet: pet,
+                    recommendedCount: model.recommendedGroomers(for: task).count,
+                    isTemplateSaved: templateSaved,
+                    onSaveTemplate: {
+                        model.saveCurrentGroomingTaskAsTemplate()
+                        templateSaved = true
+                        showTemplateSavedAlert = true
+                    },
+                    onEdit: {
+                        populateDraft(from: task)
+                        isEditingTask = true
+                    },
+                    onCancel: {
+                        clearTaskDraft()
+                        model.cancelGroomingTask()
+                        isEditingTask = true
+                        templateSaved = false
+                    }
+                )
+            } else {
+                taskForm
+            }
+        }
+        .taskCard()
+        .padding(.horizontal, 18)
+        .confirmationDialog("Add style reference", isPresented: $showStyleReferenceOptions, titleVisibility: .visible) {
+            Button("Take Photo") {
+                styleReferenceSource = .camera
+            }
+            Button("Upload from Photos") {
+                styleReferenceSource = .photoLibrary
+            }
+            if styleReferenceSource != nil {
+                Button("Remove Reference", role: .destructive) {
+                    styleReferenceSource = nil
+                }
+            }
+        } message: {
+            Text("Attach a style you like so the groomer can understand the look.")
+        }
+        .confirmationDialog("Saved task templates", isPresented: $showTemplatePicker, titleVisibility: .visible) {
+            ForEach(model.savedGroomingTaskTemplates) { template in
+                Button(templateOptionTitle(for: template)) {
+                    applyTemplate(template)
+                }
+            }
+        } message: {
+            Text("Choosing a template fills the task details but leaves the date as today.")
+        }
+        .alert("No saved templates yet", isPresented: $showNoTemplatesAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Generate a task card, then tap the bookmark to save it as a reusable template.")
+        }
+        .alert("Saved as task card template", isPresented: $showTemplateSavedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("You can reuse this task setup from Templates next time. The date will reset for each new request.")
+        }
+    }
+
+    private var taskForm: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                taskField(title: "Pet") {
+                    Picker("Pet", selection: $selectedPetIndex) {
+                        ForEach(Array(model.pets.enumerated()), id: \.element.id) { index, pet in
+                            Text(pet.name).tag(index)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                taskField(title: "Service") {
+                    Picker("Service", selection: $selectedService) {
+                        ForEach(GroomingTaskService.allCases) { service in
+                            Text(service.rawValue).tag(service)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            HStack(spacing: 10) {
+                taskField(title: "Date") {
+                    DatePicker("Date", selection: $selectedDate, in: validTaskDateRange, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                }
+
+                taskField(title: "Time") {
+                    Picker("Time", selection: $selectedTimeWindow) {
+                        ForEach(GroomingTaskTimeWindow.allCases) { window in
+                            Text(window.displayTitle).tag(window)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    TextField("Style goal, e.g. bath only, teddy face, summer cut", text: $styleGoal, axis: .vertical)
+                        .lineLimit(1...3)
+                    Button {
+                        showStyleReferenceOptions = true
+                    } label: {
+                        Image(systemName: styleReferenceSource == nil ? "plus.circle.fill" : "photo.badge.checkmark")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(styleReferenceSource == nil ? PetTheme.coral : PetTheme.sage)
+                            .frame(width: 34, height: 34)
+                    }
+                    .accessibilityLabel("Add style reference photo")
+                }
+
+                if let styleReferenceSource {
+                    Label(styleReferenceSource.displayTitle, systemImage: styleReferenceSource.iconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.sage)
+                }
+            }
+            .padding(12)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            TextField("Special notes, e.g. matting, sensitive skin, afraid of dryers", text: $specialNotes, axis: .vertical)
+                .lineLimit(2...4)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Button {
+                generateTaskCard()
+            } label: {
+                Label(model.currentGroomingTask == nil ? "Generate task card" : "Update task card", systemImage: "wand.and.stars")
+            }
+            .buttonStyle(CoralButtonStyle())
+        }
+    }
+
+    private func taskField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func defaultStyleGoal(for service: GroomingTaskService) -> String {
+        switch service {
+        case .bath: "Clean coat, bath, dry, and brush-out"
+        case .fullGroom: "Full groom with tidy, practical finish"
+        case .haircut: "Haircut with a style that fits coat condition"
+        case .nailTrim: "Nail trim and basic paw cleanup"
+        case .dematting: "De-matting assessment and safe coat plan"
+        case .catGrooming: "Low-stress cat grooming"
+        case .faceTrim: "Face trim and eye area cleanup"
+        case .sanitaryTrim: "Sanitary trim and hygiene cleanup"
+        }
+    }
+
+    private func generateTaskCard() {
+        guard let selectedPet else { return }
+        let safeDate = selectedDate < todayStart ? todayStart : selectedDate
+        selectedDate = safeDate
+        let cleanedStyleGoal = cleaned(styleGoal)
+
+        model.saveGroomingTask(
+            pet: selectedPet,
+            service: selectedService,
+            targetDate: safeDate,
+            timeWindow: selectedTimeWindow,
+            styleGoal: cleanedStyleGoal.isEmpty ? defaultStyleGoal(for: selectedService) : cleanedStyleGoal,
+            specialNotes: cleaned(specialNotes),
+            styleReferenceSource: styleReferenceSource
+        )
+        isEditingTask = false
+        templateSaved = false
+    }
+
+    private func populateDraft(from task: GroomingTask) {
+        if let petIndex = model.pets.firstIndex(where: { $0.id == task.petID }) {
+            selectedPetIndex = petIndex
+        }
+        selectedService = task.service
+        selectedDate = task.targetDate < todayStart ? todayStart : task.targetDate
+        selectedTimeWindow = task.timeWindow
+        styleGoal = task.styleGoal
+        specialNotes = task.specialNotes
+        styleReferenceSource = task.styleReferenceSource
+    }
+
+    private func clearTaskDraft() {
+        selectedPetIndex = 0
+        selectedService = .bath
+        selectedDate = todayStart
+        selectedTimeWindow = .eightAM
+        styleGoal = ""
+        specialNotes = ""
+        styleReferenceSource = nil
+    }
+
+    private func applyTemplate(_ template: GroomingTaskTemplate) {
+        if let petIndex = model.pets.firstIndex(where: { $0.id == template.petID }) {
+            selectedPetIndex = petIndex
+        }
+        selectedService = template.service
+        selectedDate = todayStart
+        selectedTimeWindow = template.timeWindow
+        styleGoal = template.styleGoal
+        specialNotes = template.specialNotes
+        styleReferenceSource = template.styleReferenceSource
+        model.cancelGroomingTask()
+        isEditingTask = true
+        templateSaved = false
+    }
+
+    private func templateOptionTitle(for template: GroomingTaskTemplate) -> String {
+        let petName = model.pets.first { $0.id == template.petID }?.name ?? "Pet"
+        return "\(petName) · \(template.service.rawValue) · \(template.timeWindow.displayTitle)"
+    }
+
+    private func cleaned(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GroomingTaskCard: View {
+    let task: GroomingTask
+    let pet: Pet
+    let recommendedCount: Int
+    let isTemplateSaved: Bool
+    let onSaveTemplate: () -> Void
+    let onEdit: () -> Void
+    let onCancel: () -> Void
+
+    private var dateText: String {
+        task.targetDate.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var summaryText: String {
+        var details = "\(pet.name)'s \(task.service.rawValue.lowercased()) task is ready for \(dateText) at \(task.timeWindow.displayTitle), with the goal \"\(task.styleGoal)\""
+        if let styleReferenceSource = task.styleReferenceSource {
+            details += " and \(styleReferenceSource.displayTitle.lowercased())"
+        }
+        if !task.specialNotes.isEmpty {
+            details += "; notes: \(task.specialNotes)"
+        }
+        details += ", so \(recommendedCount) groomers below are filtered for this request."
+        return details
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Task card ready")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.coralDark)
+
+                Text(summaryText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.trailing, 32)
+
+                HStack(spacing: 10) {
+                    Button(action: onEdit) {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .buttonStyle(QuietButtonStyle())
+
+                    Button(role: .destructive, action: onCancel) {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                    .buttonStyle(QuietButtonStyle())
+
+                    Spacer()
+                }
+            }
+
+            Button(action: onSaveTemplate) {
+                Image(systemName: isTemplateSaved ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isTemplateSaved ? PetTheme.coral : Color.gray.opacity(0.75))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isTemplateSaved ? "Task template saved" : "Save task template")
         }
     }
 }

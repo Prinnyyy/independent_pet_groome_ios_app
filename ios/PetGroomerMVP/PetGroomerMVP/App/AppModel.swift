@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
     @Published var quoteRequests: [QuoteRequest]
     @Published var reports: [Report]
     @Published var featureFlags: [FeatureFlag]
+    @Published var savedGroomingTaskTemplates: [GroomingTaskTemplate]
+    @Published var currentGroomingTask: GroomingTask?
 
     private let authRepository: AuthRepository
     private let petRepository: PetRepository
@@ -56,6 +58,8 @@ final class AppModel: ObservableObject {
         self.quoteRequests = MockData.quoteRequests
         self.reports = []
         self.featureFlags = MockData.featureFlags
+        self.savedGroomingTaskTemplates = []
+        self.currentGroomingTask = nil
     }
 
     var savedGroomers: [Groomer] {
@@ -106,6 +110,131 @@ final class AppModel: ObservableObject {
             let verifiedMatch = !verifiedOnly || groomer.isVerified
             let catMatch = !acceptsCatsOnly || groomer.acceptsCats
             return queryMatch && cityMatch && verifiedMatch && catMatch
+        }
+    }
+
+    func pet(for task: GroomingTask) -> Pet? {
+        pets.first { $0.id == task.petID }
+    }
+
+    func saveGroomingTask(
+        pet: Pet,
+        service: GroomingTaskService,
+        targetDate: Date,
+        timeWindow: GroomingTaskTimeWindow,
+        styleGoal: String,
+        specialNotes: String,
+        styleReferenceSource: GroomingTaskStyleReferenceSource?
+    ) {
+        currentGroomingTask = GroomingTask(
+            id: UUID(),
+            userID: currentUser.id,
+            petID: pet.id,
+            service: service,
+            targetDate: targetDate,
+            timeWindow: timeWindow,
+            styleGoal: styleGoal,
+            specialNotes: specialNotes,
+            styleReferenceSource: styleReferenceSource,
+            createdAt: Date()
+        )
+    }
+
+    func cancelGroomingTask() {
+        currentGroomingTask = nil
+    }
+
+    @discardableResult
+    func saveCurrentGroomingTaskAsTemplate() -> GroomingTaskTemplate? {
+        guard let task = currentGroomingTask, let pet = pet(for: task) else { return nil }
+
+        let template = GroomingTaskTemplate(
+            id: UUID(),
+            userID: currentUser.id,
+            name: "\(pet.name) · \(task.service.rawValue)",
+            petID: task.petID,
+            service: task.service,
+            timeWindow: task.timeWindow,
+            styleGoal: task.styleGoal,
+            specialNotes: task.specialNotes,
+            styleReferenceSource: task.styleReferenceSource,
+            createdAt: Date()
+        )
+
+        savedGroomingTaskTemplates.removeAll { existing in
+            existing.petID == template.petID &&
+                existing.service == template.service &&
+                existing.timeWindow == template.timeWindow &&
+                existing.styleGoal == template.styleGoal &&
+                existing.specialNotes == template.specialNotes &&
+                existing.styleReferenceSource == template.styleReferenceSource
+        }
+        savedGroomingTaskTemplates.insert(template, at: 0)
+        return template
+    }
+
+    func recommendedGroomers(for task: GroomingTask) -> [Groomer] {
+        guard let pet = pet(for: task) else { return groomers }
+
+        return groomers
+            .filter { groomer in
+                guard groomer.status == .published else { return false }
+                let speciesMatch = pet.species == .cat ? groomer.acceptsCats : groomer.acceptsDogs
+                let sizeMatch = pet.species == .cat || acceptedSize(for: pet).map { groomer.sizeAccepted.contains($0) } ?? true
+                return speciesMatch && sizeMatch
+            }
+            .sorted { lhs, rhs in
+                recommendationScore(groomer: lhs, pet: pet, task: task) > recommendationScore(groomer: rhs, pet: pet, task: task)
+            }
+    }
+
+    private func acceptedSize(for pet: Pet) -> String? {
+        guard pet.species == .dog, let weight = pet.weight else { return nil }
+        if weight <= 20 { return "Small" }
+        if weight <= 50 { return "Medium" }
+        return "Large"
+    }
+
+    private func recommendationScore(groomer: Groomer, pet: Pet, task: GroomingTask) -> Double {
+        var score = groomer.rating
+
+        if groomer.city == currentUser.city || groomer.serviceAreas.contains(currentUser.city) {
+            score += 3
+        }
+        if groomer.isVerified {
+            score += 1.4
+        }
+        if serviceMatches(groomer: groomer, service: task.service) {
+            score += 2.4
+        }
+        if groomer.specialties.contains(pet.breed) {
+            score += 1.6
+        }
+        if pet.temperament.contains(where: { temperament in groomer.specialties.contains(temperament) }) {
+            score += 1.2
+        }
+        if pet.coatCondition.localizedCaseInsensitiveContains("matting") && groomer.specialties.contains("De-matting") {
+            score += 1.5
+        }
+        if !task.specialNotes.isEmpty {
+            score += 0.2
+        }
+
+        return score
+    }
+
+    private func serviceMatches(groomer: Groomer, service: GroomingTaskService) -> Bool {
+        switch service {
+        case .bath, .nailTrim, .sanitaryTrim:
+            true
+        case .fullGroom:
+            groomer.serviceMethods.contains("Home studio") || groomer.serviceMethods.contains("Mobile grooming") || groomer.specialties.contains("Teddy cut")
+        case .haircut, .faceTrim:
+            groomer.specialties.contains("Teddy cut") || groomer.specialties.contains("Asian fusion style") || groomer.specialties.contains("Poodle")
+        case .dematting:
+            groomer.specialties.contains("De-matting")
+        case .catGrooming:
+            groomer.acceptsCats || groomer.specialties.contains("Cats")
         }
     }
 
