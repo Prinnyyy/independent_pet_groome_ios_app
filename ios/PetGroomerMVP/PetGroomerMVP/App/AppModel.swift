@@ -234,9 +234,34 @@ final class AppModel: ObservableObject {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    func sendTaskMessage(submissionID: UUID, senderRole: AppRole, body: String) {
+    func chatConversations(for viewerRole: AppRole) -> [TaskChatConversation] {
+        groomingTaskSubmissions
+            .filter { submission in
+                switch viewerRole {
+                case .petOwner:
+                    submission.userID == currentUser.id
+                case .groomer:
+                    submission.groomerID == managedGroomerID
+                }
+            }
+            .compactMap { submission in
+                let conversationMessages = messages(for: submission.id)
+                let lastMessage = conversationMessages.last
+                return TaskChatConversation(
+                    id: submission.id,
+                    submission: submission,
+                    counterpartName: counterpartName(for: submission, viewerRole: viewerRole),
+                    counterpartSubtitle: "\(submission.taskSnapshot.petSnapshot.name) · \(submission.taskSnapshot.service.rawValue)",
+                    lastMessage: lastMessage,
+                    lastActivityAt: lastMessage?.createdAt ?? submission.updatedAt
+                )
+            }
+            .sorted { $0.lastActivityAt > $1.lastActivityAt }
+    }
+
+    func sendTaskMessage(submissionID: UUID, senderRole: AppRole, body: String, imageURL: String? = nil) {
         let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+        guard !cleaned.isEmpty || imageURL != nil else { return }
 
         let senderName: String
         switch senderRole {
@@ -252,6 +277,7 @@ final class AppModel: ObservableObject {
             senderRole: senderRole,
             senderName: senderName,
             body: cleaned,
+            imageURL: imageURL,
             createdAt: Date()
         )
         taskChatMessages.append(message)
@@ -259,6 +285,15 @@ final class AppModel: ObservableObject {
         if let index = groomingTaskSubmissions.firstIndex(where: { $0.id == submissionID }) {
             groomingTaskSubmissions[index].updatedAt = Date()
         }
+    }
+
+    func sendTaskImageMessage(submissionID: UUID, senderRole: AppRole) {
+        sendTaskMessage(
+            submissionID: submissionID,
+            senderRole: senderRole,
+            body: "",
+            imageURL: "mock://chat-photo-\(Int.random(in: 1000...9999))"
+        )
     }
 
     @discardableResult
@@ -544,5 +579,14 @@ final class AppModel: ObservableObject {
                 updatedAt: Date()
             )
         )
+    }
+
+    private func counterpartName(for submission: GroomingTaskSubmission, viewerRole: AppRole) -> String {
+        switch viewerRole {
+        case .petOwner:
+            groomers.first { $0.id == submission.groomerID }?.name ?? "Groomer"
+        case .groomer:
+            currentUser.displayName
+        }
     }
 }

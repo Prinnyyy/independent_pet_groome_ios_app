@@ -259,7 +259,17 @@ struct TaskChatMessage: Identifiable, Codable, Hashable {
     var senderRole: AppRole
     var senderName: String
     var body: String
+    var imageURL: String?
     var createdAt: Date
+}
+
+struct TaskChatConversation: Identifiable, Hashable {
+    let id: UUID
+    var submission: GroomingTaskSubmission
+    var counterpartName: String
+    var counterpartSubtitle: String
+    var lastMessage: TaskChatMessage?
+    var lastActivityAt: Date
 }
 
 struct GroomingTaskTemplate: Identifiable, Codable, Hashable {

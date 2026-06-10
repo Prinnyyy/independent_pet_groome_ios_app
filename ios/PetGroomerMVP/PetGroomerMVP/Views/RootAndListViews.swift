@@ -73,6 +73,7 @@ struct HomeView: View {
     @State private var showNoTemplatesAlert = false
     @State private var showTemplateSavedAlert = false
     @State private var selectedGroomerForDetails: Groomer?
+    @State private var showChatInbox = false
 
     private var selectedPet: Pet? {
         guard model.pets.indices.contains(selectedPetIndex) else { return model.pets.first }
@@ -164,8 +165,20 @@ struct HomeView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ChatToolbarButton(
+                    hasConversations: !model.chatConversations(for: .petOwner).isEmpty,
+                    action: { showChatInbox = true }
+                )
+            }
+        }
         .sheet(isPresented: $showNewPet) {
             PetEditorView(mode: .create)
+                .environmentObject(model)
+        }
+        .sheet(isPresented: $showChatInbox) {
+            TaskChatInboxView(viewerRole: .petOwner)
                 .environmentObject(model)
         }
         .navigationDestination(item: $selectedGroomerForDetails) { groomer in

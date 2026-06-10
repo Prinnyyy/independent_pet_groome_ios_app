@@ -229,9 +229,13 @@ create table public.grooming_task_messages (
   submission_id uuid references public.grooming_task_submissions(id) on delete cascade,
   sender_user_id uuid references public.users(id) on delete set null,
   sender_role text not null check (sender_role in ('pet_owner', 'groomer')),
-  message_text text not null,
+  message_text text not null default '',
+  image_url text,
   created_at timestamp with time zone default now()
 );
+
+comment on column public.grooming_task_messages.image_url is
+  'Optional chat image attachment. MVP demo uses local/mock references; production should store images in a private Supabase Storage bucket.';
 
 create table public.quote_requests (
   id uuid primary key default gen_random_uuid(),

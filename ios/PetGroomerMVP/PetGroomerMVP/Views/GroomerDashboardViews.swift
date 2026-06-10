@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct GroomerTodayView: View {
@@ -210,6 +211,7 @@ struct MyGroomerProfileView: View {
 
 struct GroomerInboxView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showChatInbox = false
 
     var body: some View {
         ScrollView {
@@ -273,6 +275,18 @@ struct GroomerInboxView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ChatToolbarButton(
+                    hasConversations: !model.chatConversations(for: .groomer).isEmpty,
+                    action: { showChatInbox = true }
+                )
+            }
+        }
+        .sheet(isPresented: $showChatInbox) {
+            TaskChatInboxView(viewerRole: .groomer)
+                .environmentObject(model)
+        }
     }
 }
 
@@ -625,8 +639,10 @@ struct ScheduledTaskDetailView: View {
                 }
                 .padding(.bottom, 28)
                 .sheet(isPresented: $showChat) {
-                    TaskChatView(submissionID: submission.id)
-                        .environmentObject(model)
+                    NavigationStack {
+                        TaskChatView(submissionID: submission.id, senderRole: .groomer)
+                            .environmentObject(model)
+                    }
                 }
             } else {
                 EmptyState(title: "Task not found", message: "This scheduled task card is no longer available.", systemImage: "calendar.badge.exclamationmark")
@@ -833,8 +849,10 @@ struct GroomingTaskSubmissionDetailView: View {
                 }
                 .padding(.bottom, 28)
                 .sheet(isPresented: $showChat) {
-                    TaskChatView(submissionID: submission.id)
-                        .environmentObject(model)
+                    NavigationStack {
+                        TaskChatView(submissionID: submission.id, senderRole: .groomer)
+                            .environmentObject(model)
+                    }
                 }
             } else {
                 EmptyState(title: "Task not found", message: "This task card is no longer available.", systemImage: "tray")
@@ -885,68 +903,71 @@ struct GroomingTaskSubmissionDetailView: View {
     }
 }
 
-struct TaskChatView: View {
+struct ChatToolbarButton: View {
+    let hasConversations: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.headline)
+                    .foregroundStyle(PetTheme.coral)
+                    .frame(width: 36, height: 36)
+
+                if hasConversations {
+                    Circle()
+                        .fill(PetTheme.sage)
+                        .frame(width: 9, height: 9)
+                        .offset(x: -4, y: 5)
+                }
+            }
+        }
+        .accessibilityLabel("Open messages")
+    }
+}
+
+struct TaskChatInboxView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = ""
-    @State private var senderRole: AppRole = .groomer
 
-    let submissionID: UUID
+    let viewerRole: AppRole
 
-    private var messages: [TaskChatMessage] {
-        model.messages(for: submissionID)
+    private var conversations: [TaskChatConversation] {
+        model.chatConversations(for: viewerRole)
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                Picker("Sender", selection: $senderRole) {
-                    Text("Groomer").tag(AppRole.groomer)
-                    Text("Customer").tag(AppRole.petOwner)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-
-                ScrollView {
-                    VStack(spacing: 10) {
-                        if messages.isEmpty {
-                            EmptyState(title: "No messages yet", message: "Use this chat to align scope, timing, price, and pet handling details.", systemImage: "bubble.left.and.bubble.right")
-                                .padding(.horizontal, 0)
-                        } else {
-                            ForEach(messages) { message in
-                                chatBubble(message)
+            ScrollView {
+                VStack(spacing: 12) {
+                    if conversations.isEmpty {
+                        EmptyState(
+                            title: "No conversations yet",
+                            message: "Task-card messages with customers or groomers will appear here.",
+                            systemImage: "bubble.left.and.bubble.right"
+                        )
+                    } else {
+                        ForEach(conversations) { conversation in
+                            NavigationLink {
+                                TaskChatView(
+                                    submissionID: conversation.id,
+                                    senderRole: viewerRole,
+                                    showsDoneButton: false
+                                )
+                                .environmentObject(model)
+                            } label: {
+                                ChatConversationRow(conversation: conversation)
                             }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 18)
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
                 }
-
-                HStack(spacing: 8) {
-                    TextField("Write a message", text: $draft, axis: .vertical)
-                        .lineLimit(1...4)
-                        .padding(11)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    Button {
-                        model.sendTaskMessage(submissionID: submissionID, senderRole: senderRole, body: draft)
-                        draft = ""
-                    } label: {
-                        Image(systemName: "paperplane.fill")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(PetTheme.coral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
-                }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 12)
+                .padding(.vertical, 16)
             }
             .appBackground()
-            .navigationTitle("Task Chat")
+            .navigationTitle("Messages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -955,36 +976,245 @@ struct TaskChatView: View {
             }
         }
     }
+}
+
+struct ChatConversationRow: View {
+    let conversation: TaskChatConversation
+
+    private var initials: String {
+        conversation.counterpartName
+            .split(separator: " ")
+            .compactMap { $0.first }
+            .prefix(2)
+            .map(String.init)
+            .joined()
+    }
+
+    private var preview: String {
+        guard let message = conversation.lastMessage else {
+            return "Task card conversation ready"
+        }
+
+        if message.imageURL != nil && message.body.isEmpty {
+            return "Photo"
+        }
+        if message.imageURL != nil {
+            return "\(message.body) · Photo"
+        }
+        return message.body
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [PetTheme.apricot, PetTheme.mint, PetTheme.sky],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(PetTheme.ink)
+            }
+            .frame(width: 54, height: 54)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(conversation.counterpartName)
+                        .font(.headline.weight(.semibold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(conversation.lastActivityAt.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                }
+
+                Text(conversation.counterpartSubtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PetTheme.sage)
+                    .lineLimit(1)
+
+                Text(preview)
+                    .font(.subheadline)
+                    .foregroundStyle(PetTheme.muted)
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted.opacity(0.72))
+        }
+        .taskCard()
+    }
+}
+
+struct TaskChatView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = ""
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+
+    let submissionID: UUID
+    let senderRole: AppRole
+    var showsDoneButton = true
+
+    private var messages: [TaskChatMessage] {
+        model.messages(for: submissionID)
+    }
+
+    private var conversation: TaskChatConversation? {
+        model.chatConversations(for: senderRole).first { $0.id == submissionID }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    if messages.isEmpty {
+                        EmptyState(
+                            title: "No messages yet",
+                            message: "Send a text or photo to discuss timing, handling, style details, and price.",
+                            systemImage: "bubble.left.and.bubble.right"
+                        )
+                        .padding(.horizontal, 0)
+                    } else {
+                        ForEach(messages) { message in
+                            chatBubble(message)
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                PhotosPicker(selection: $selectedPhotoItems, maxSelectionCount: 1, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.headline)
+                        .foregroundStyle(PetTheme.coral)
+                        .frame(width: 42, height: 42)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(PetTheme.line.opacity(0.7), lineWidth: 1)
+                        )
+                }
+                .accessibilityLabel("Upload photo from album")
+
+                TextField("Message", text: $draft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .padding(11)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Button {
+                    model.sendTaskMessage(submissionID: submissionID, senderRole: senderRole, body: draft)
+                    draft = ""
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(PetTheme.coral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(PetTheme.cream)
+        }
+        .appBackground()
+        .navigationTitle(conversation?.counterpartName ?? "Messages")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsDoneButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .onChange(of: selectedPhotoItems.count) { _, count in
+            guard count > 0 else { return }
+            for _ in selectedPhotoItems {
+                model.sendTaskImageMessage(submissionID: submissionID, senderRole: senderRole)
+            }
+            selectedPhotoItems.removeAll()
+        }
+    }
 
     private func chatBubble(_ message: TaskChatMessage) -> some View {
-        HStack {
-            if message.senderRole == .groomer {
+        let isOutgoing = message.senderRole == senderRole
+
+        return HStack {
+            if isOutgoing {
                 Spacer(minLength: 44)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(message.senderName)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(message.senderRole == .groomer ? .white.opacity(0.82) : PetTheme.muted)
-                Text(message.body)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(message.senderRole == .groomer ? .white : PetTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(isOutgoing ? .white.opacity(0.82) : PetTheme.muted)
+
+                if message.imageURL != nil {
+                    chatImagePreview(isOutgoing: isOutgoing)
+                }
+
+                if !message.body.isEmpty {
+                    Text(message.body)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isOutgoing ? .white : PetTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(11)
+            .frame(maxWidth: 260, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(message.senderRole == .groomer ? PetTheme.coral : .white)
+                    .fill(isOutgoing ? PetTheme.coral : .white)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(message.senderRole == .groomer ? Color.clear : PetTheme.line.opacity(0.65), lineWidth: 1)
+                    .stroke(isOutgoing ? Color.clear : PetTheme.line.opacity(0.65), lineWidth: 1)
             )
 
-            if message.senderRole == .petOwner {
+            if !isOutgoing {
                 Spacer(minLength: 44)
             }
         }
+    }
+
+    private func chatImagePreview(isOutgoing: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: isOutgoing ? [.white.opacity(0.22), .white.opacity(0.08)] : [PetTheme.sky.opacity(0.55), PetTheme.apricot.opacity(0.45)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            VStack(spacing: 6) {
+                Image(systemName: "photo.fill")
+                    .font(.title2)
+                    .foregroundStyle(isOutgoing ? .white : PetTheme.sage)
+                Text("Album photo")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(isOutgoing ? .white.opacity(0.9) : PetTheme.ink)
+            }
+        }
+        .frame(width: 190, height: 128)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isOutgoing ? .white.opacity(0.2) : PetTheme.line.opacity(0.55), lineWidth: 1)
+        )
     }
 }
 
