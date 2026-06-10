@@ -72,6 +72,7 @@ struct HomeView: View {
     @State private var showTemplatePicker = false
     @State private var showNoTemplatesAlert = false
     @State private var showTemplateSavedAlert = false
+    @State private var selectedGroomerForDetails: Groomer?
 
     private var selectedPet: Pet? {
         guard model.pets.indices.contains(selectedPetIndex) else { return model.pets.first }
@@ -106,19 +107,37 @@ struct HomeView: View {
                 SectionHeader(title: model.currentGroomingTask == nil ? "Nearby groomers" : "Recommended for this task")
                 VStack(spacing: 14) {
                     ForEach(groomerResults) { groomer in
-                        NavigationLink {
-                            GroomerProfileView(groomer: groomer)
-                        } label: {
+                        if let task = model.currentGroomingTask {
+                            let submission = model.taskSubmission(for: task, groomer: groomer)
                             GroomerCard(
                                 groomer: groomer,
                                 portfolio: model.portfolio(for: groomer),
                                 isSaved: model.isFavorite(targetType: .groomer, targetID: groomer.id),
                                 onSave: { model.toggleFavorite(targetType: .groomer, targetID: groomer.id) },
-                                onContact: { model.logContact(groomer: groomer, pet: model.pets.first, method: .quoteRequest) }
+                                onContact: { model.sendCurrentTask(to: groomer) },
+                                contactTitle: submission?.status.customerActionTitle ?? "Send Task Card",
+                                contactIcon: submission == nil ? "paperplane.fill" : "checkmark.seal.fill",
+                                isContactDisabled: submission != nil,
+                                secondaryTitle: "View Profile",
+                                secondaryIcon: "person.text.rectangle",
+                                onSecondaryAction: { selectedGroomerForDetails = groomer }
                             )
+                            .padding(.horizontal, 18)
+                        } else {
+                            NavigationLink {
+                                GroomerProfileView(groomer: groomer)
+                            } label: {
+                                GroomerCard(
+                                    groomer: groomer,
+                                    portfolio: model.portfolio(for: groomer),
+                                    isSaved: model.isFavorite(targetType: .groomer, targetID: groomer.id),
+                                    onSave: { model.toggleFavorite(targetType: .groomer, targetID: groomer.id) },
+                                    onContact: { model.logContact(groomer: groomer, pet: model.pets.first, method: .quoteRequest) }
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 18)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
                     }
                 }
 
@@ -148,6 +167,9 @@ struct HomeView: View {
         .sheet(isPresented: $showNewPet) {
             PetEditorView(mode: .create)
                 .environmentObject(model)
+        }
+        .navigationDestination(item: $selectedGroomerForDetails) { groomer in
+            GroomerProfileView(groomer: groomer)
         }
         .onChange(of: model.pets.count) { _, _ in
             if selectedPetIndex >= model.pets.count {

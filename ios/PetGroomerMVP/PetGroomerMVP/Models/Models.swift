@@ -211,6 +211,51 @@ struct GroomingTaskCardData: Identifiable, Codable, Hashable {
 
 typealias GroomingTask = GroomingTaskCardData
 
+enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
+    case sent
+    case accepted
+    case declined
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .sent: "Sent"
+        case .accepted: "Accepted"
+        case .declined: "Declined"
+        }
+    }
+
+    var customerActionTitle: String {
+        switch self {
+        case .sent: "Task Card Sent"
+        case .accepted: "Task Accepted"
+        case .declined: "Task Declined"
+        }
+    }
+}
+
+struct GroomingTaskSubmission: Identifiable, Codable, Hashable {
+    let id: UUID
+    var taskID: UUID
+    var sequenceCode: String
+    var userID: UUID
+    var groomerID: UUID
+    var taskSnapshot: GroomingTask
+    var status: GroomingTaskSubmissionStatus
+    var sentAt: Date
+    var updatedAt: Date
+}
+
+struct TaskChatMessage: Identifiable, Codable, Hashable {
+    let id: UUID
+    var submissionID: UUID
+    var senderRole: AppRole
+    var senderName: String
+    var body: String
+    var createdAt: Date
+}
+
 struct GroomingTaskTemplate: Identifiable, Codable, Hashable {
     let id: UUID
     var userID: UUID

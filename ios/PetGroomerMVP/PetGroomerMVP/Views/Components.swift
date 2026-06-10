@@ -37,6 +37,12 @@ struct GroomerCard: View {
     let isSaved: Bool
     let onSave: () -> Void
     let onContact: () -> Void
+    var contactTitle: String = "Contact groomer"
+    var contactIcon: String = "paperplane.fill"
+    var isContactDisabled: Bool = false
+    var secondaryTitle: String?
+    var secondaryIcon: String = "person.text.rectangle"
+    var onSecondaryAction: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -95,10 +101,23 @@ struct GroomerCard: View {
                 }
             }
 
-            Button(action: onContact) {
-                Label("Contact groomer", systemImage: "paperplane.fill")
+            HStack(spacing: 9) {
+                Button(action: onContact) {
+                    Label(contactTitle, systemImage: contactIcon)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CoralButtonStyle())
+                .disabled(isContactDisabled)
+                .opacity(isContactDisabled ? 0.58 : 1)
+
+                if let secondaryTitle, let onSecondaryAction {
+                    Button(action: onSecondaryAction) {
+                        Label(secondaryTitle, systemImage: secondaryIcon)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                }
             }
-            .buttonStyle(CoralButtonStyle())
         }
         .taskCard()
     }

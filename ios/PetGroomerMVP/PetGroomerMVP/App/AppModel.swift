@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     @Published var featureFlags: [FeatureFlag]
     @Published var savedGroomingTaskTemplates: [GroomingTaskTemplate]
     @Published var groomingTasks: [GroomingTask]
+    @Published var groomingTaskSubmissions: [GroomingTaskSubmission]
+    @Published var taskChatMessages: [TaskChatMessage]
     @Published var currentGroomingTask: GroomingTask?
 
     private let authRepository: AuthRepository
@@ -61,6 +63,8 @@ final class AppModel: ObservableObject {
         self.featureFlags = MockData.featureFlags
         self.savedGroomingTaskTemplates = []
         self.groomingTasks = []
+        self.groomingTaskSubmissions = []
+        self.taskChatMessages = []
         self.currentGroomingTask = nil
     }
 
@@ -156,6 +160,82 @@ final class AppModel: ObservableObject {
 
     func groomingTask(sequenceCode: String) -> GroomingTask? {
         groomingTasks.first { $0.sequenceCode.caseInsensitiveCompare(sequenceCode) == .orderedSame }
+    }
+
+    func taskSubmissions(for groomer: Groomer) -> [GroomingTaskSubmission] {
+        groomingTaskSubmissions
+            .filter { $0.groomerID == groomer.id }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func taskSubmission(id: UUID) -> GroomingTaskSubmission? {
+        groomingTaskSubmissions.first { $0.id == id }
+    }
+
+    func taskSubmission(for task: GroomingTask, groomer: Groomer) -> GroomingTaskSubmission? {
+        groomingTaskSubmissions.first { $0.taskID == task.id && $0.groomerID == groomer.id }
+    }
+
+    @discardableResult
+    func sendCurrentTask(to groomer: Groomer) -> GroomingTaskSubmission? {
+        guard let task = currentGroomingTask else { return nil }
+        if let existing = taskSubmission(for: task, groomer: groomer) {
+            return existing
+        }
+
+        let submission = GroomingTaskSubmission(
+            id: UUID(),
+            taskID: task.id,
+            sequenceCode: task.sequenceCode,
+            userID: task.userID,
+            groomerID: groomer.id,
+            taskSnapshot: task,
+            status: .sent,
+            sentAt: Date(),
+            updatedAt: Date()
+        )
+        groomingTaskSubmissions.insert(submission, at: 0)
+        logContact(groomer: groomer, pet: task.petSnapshot, method: .quoteRequest)
+        return submission
+    }
+
+    func updateTaskSubmissionStatus(id: UUID, status: GroomingTaskSubmissionStatus) {
+        guard let index = groomingTaskSubmissions.firstIndex(where: { $0.id == id }) else { return }
+        groomingTaskSubmissions[index].status = status
+        groomingTaskSubmissions[index].updatedAt = Date()
+    }
+
+    func messages(for submissionID: UUID) -> [TaskChatMessage] {
+        taskChatMessages
+            .filter { $0.submissionID == submissionID }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    func sendTaskMessage(submissionID: UUID, senderRole: AppRole, body: String) {
+        let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        let senderName: String
+        switch senderRole {
+        case .petOwner:
+            senderName = currentUser.displayName
+        case .groomer:
+            senderName = managedGroomer?.name ?? "Groomer"
+        }
+
+        let message = TaskChatMessage(
+            id: UUID(),
+            submissionID: submissionID,
+            senderRole: senderRole,
+            senderName: senderName,
+            body: cleaned,
+            createdAt: Date()
+        )
+        taskChatMessages.append(message)
+
+        if let index = groomingTaskSubmissions.firstIndex(where: { $0.id == submissionID }) {
+            groomingTaskSubmissions[index].updatedAt = Date()
+        }
     }
 
     @discardableResult

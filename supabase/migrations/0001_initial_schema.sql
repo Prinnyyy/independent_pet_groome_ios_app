@@ -208,6 +208,31 @@ comment on column public.grooming_tasks.reference_image_byte_size is
 comment on column public.grooming_tasks.owner_hidden_score is
   'Private groomer-visible client score derived from the previous groomer evaluation. Do not expose in pet-owner API responses or owner RLS policies.';
 
+create table public.grooming_task_submissions (
+  id uuid primary key default gen_random_uuid(),
+  grooming_task_id uuid references public.grooming_tasks(id) on delete cascade,
+  sequence_code text not null,
+  user_id uuid references public.users(id) on delete cascade,
+  groomer_id uuid references public.groomers(id) on delete cascade,
+  task_snapshot jsonb not null,
+  status text not null default 'sent' check (status in ('sent', 'accepted', 'declined')),
+  sent_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now(),
+  unique (grooming_task_id, groomer_id)
+);
+
+comment on table public.grooming_task_submissions is
+  'A generated task card sent to a specific groomer inbox. Declined submissions should be rendered disabled in groomer UI.';
+
+create table public.grooming_task_messages (
+  id uuid primary key default gen_random_uuid(),
+  submission_id uuid references public.grooming_task_submissions(id) on delete cascade,
+  sender_user_id uuid references public.users(id) on delete set null,
+  sender_role text not null check (sender_role in ('pet_owner', 'groomer')),
+  message_text text not null,
+  created_at timestamp with time zone default now()
+);
+
 create table public.quote_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.users(id) on delete set null,
@@ -270,6 +295,10 @@ create index grooming_tasks_sequence_code_idx on public.grooming_tasks(sequence_
 create index grooming_tasks_user_id_idx on public.grooming_tasks(user_id);
 create index grooming_tasks_pet_id_idx on public.grooming_tasks(pet_id);
 create index grooming_tasks_status_idx on public.grooming_tasks(status);
+create index grooming_task_submissions_groomer_id_idx on public.grooming_task_submissions(groomer_id);
+create index grooming_task_submissions_user_id_idx on public.grooming_task_submissions(user_id);
+create index grooming_task_submissions_status_idx on public.grooming_task_submissions(status);
+create index grooming_task_messages_submission_id_idx on public.grooming_task_messages(submission_id);
 create index quote_requests_groomer_id_idx on public.quote_requests(groomer_id);
 create index reports_status_idx on public.reports(status);
 create index ai_usage_logs_feature_type_idx on public.ai_usage_logs(feature_type);
@@ -287,6 +316,9 @@ create trigger set_reviews_updated_at before update on public.reviews
 for each row execute function public.set_updated_at();
 
 create trigger set_grooming_tasks_updated_at before update on public.grooming_tasks
+for each row execute function public.set_updated_at();
+
+create trigger set_grooming_task_submissions_updated_at before update on public.grooming_task_submissions
 for each row execute function public.set_updated_at();
 
 create trigger set_quote_requests_updated_at before update on public.quote_requests
