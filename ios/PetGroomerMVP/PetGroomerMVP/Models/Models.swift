@@ -215,6 +215,8 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
     case sent
     case accepted
     case declined
+    case completed
+    case cancelled
 
     var id: String { rawValue }
 
@@ -223,6 +225,8 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
         case .sent: "Sent"
         case .accepted: "Accepted"
         case .declined: "Declined"
+        case .completed: "Completed"
+        case .cancelled: "Cancelled"
         }
     }
 
@@ -231,6 +235,8 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
         case .sent: "Task Card Sent"
         case .accepted: "Task Accepted"
         case .declined: "Task Declined"
+        case .completed: "Task Completed"
+        case .cancelled: "Task Cancelled"
         }
     }
 }

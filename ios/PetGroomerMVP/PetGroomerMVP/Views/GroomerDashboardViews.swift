@@ -276,6 +276,412 @@ struct GroomerInboxView: View {
     }
 }
 
+struct GroomerScheduleView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var selectedDate = Date()
+
+    private var calendar = Calendar.current
+
+    private var selectedMonthTitle: String {
+        selectedDate.formatted(.dateTime.month(.wide).year())
+    }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.shortStandaloneWeekdaySymbols
+        let firstIndex = calendar.firstWeekday - 1
+        return (0..<7).map { symbols[(firstIndex + $0) % 7] }
+    }
+
+    private var visibleDays: [Date] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: selectedDate) else {
+            return []
+        }
+
+        let firstDay = calendar.startOfDay(for: monthInterval.start)
+        let leadingDays = (calendar.component(.weekday, from: firstDay) - calendar.firstWeekday + 7) % 7
+        let gridStart = calendar.date(byAdding: .day, value: -leadingDays, to: firstDay) ?? firstDay
+        return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0, to: gridStart) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                ScreenTitle(
+                    title: "Schedule",
+                    subtitle: "Accepted task cards are arranged by date and time so you can manage the workday inside the app."
+                )
+
+                if let groomer = model.managedGroomer {
+                    let scheduledSubmissions = model.scheduledTaskSubmissions(for: groomer)
+                    let selectedSubmissions = model.scheduledTaskSubmissions(for: groomer, on: selectedDate)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Button {
+                                moveMonth(by: -1)
+                            } label: {
+                                Image(systemName: "chevron.left")
+                                    .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+                            Text(selectedMonthTitle)
+                                .font(.headline.weight(.semibold))
+                                .fontDesign(.rounded)
+                                .foregroundStyle(PetTheme.ink)
+                            Spacer()
+
+                            Button {
+                                moveMonth(by: 1)
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .foregroundStyle(PetTheme.coralDark)
+
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
+                            ForEach(weekdaySymbols, id: \.self) { symbol in
+                                Text(symbol)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(PetTheme.muted)
+                                    .frame(maxWidth: .infinity)
+                            }
+
+                            ForEach(visibleDays, id: \.self) { day in
+                                ScheduleCalendarDayCell(
+                                    date: day,
+                                    taskCount: taskCount(on: day, in: scheduledSubmissions),
+                                    isSelected: calendar.isDate(day, inSameDayAs: selectedDate),
+                                    isCurrentMonth: calendar.isDate(day, equalTo: selectedDate, toGranularity: .month)
+                                ) {
+                                    selectedDate = day
+                                }
+                            }
+                        }
+                    }
+                    .taskCard()
+                    .padding(.horizontal, 18)
+
+                    SectionHeader(title: selectedDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    ScheduleDayTimelineView(date: selectedDate, submissions: selectedSubmissions)
+                } else {
+                    EmptyState(title: "No groomer profile", message: "No schedule is available for this demo user.", systemImage: "calendar")
+                }
+            }
+            .padding(.bottom, 28)
+        }
+        .appBackground()
+    }
+
+    private func taskCount(on date: Date, in submissions: [GroomingTaskSubmission]) -> Int {
+        submissions.filter { calendar.isDate($0.taskSnapshot.targetDate, inSameDayAs: date) }.count
+    }
+
+    private func moveMonth(by value: Int) {
+        selectedDate = calendar.date(byAdding: .month, value: value, to: selectedDate) ?? selectedDate
+    }
+}
+
+struct ScheduleCalendarDayCell: View {
+    let date: Date
+    let taskCount: Int
+    let isSelected: Bool
+    let isCurrentMonth: Bool
+    let action: () -> Void
+
+    private var dayNumber: String {
+        String(Calendar.current.component(.day, from: date))
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Text(dayNumber)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(isSelected ? .white : isCurrentMonth ? PetTheme.ink : PetTheme.muted.opacity(0.58))
+
+                if taskCount > 0 {
+                    Text("\(taskCount) card\(taskCount == 1 ? "" : "s")")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isSelected ? .white.opacity(0.92) : PetTheme.sage)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                } else {
+                    Text("Open")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(isSelected ? .white.opacity(0.62) : PetTheme.muted.opacity(0.38))
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? PetTheme.coral : isCurrentMonth ? .white.opacity(0.86) : Color.white.opacity(0.38))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(taskCount > 0 && !isSelected ? PetTheme.sage.opacity(0.45) : PetTheme.line.opacity(0.4), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ScheduleDayTimelineView: View {
+    let date: Date
+    let submissions: [GroomingTaskSubmission]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 0) {
+                ForEach(GroomingTaskTimeWindow.allCases) { timeWindow in
+                    ScheduleTimeSlotRow(
+                        timeWindow: timeWindow,
+                        submissions: submissions.filter { $0.taskSnapshot.timeWindow == timeWindow }
+                    )
+
+                    if timeWindow != GroomingTaskTimeWindow.allCases.last {
+                        Divider()
+                    }
+                }
+            }
+            .taskCard()
+            .padding(.horizontal, 18)
+
+            if submissions.isEmpty {
+                Text("No accepted task cards on this date.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PetTheme.muted)
+                    .padding(.horizontal, 18)
+            }
+        }
+    }
+}
+
+struct ScheduleTimeSlotRow: View {
+    let timeWindow: GroomingTaskTimeWindow
+    let submissions: [GroomingTaskSubmission]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(timeWindow.displayTitle)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+                .frame(width: 82, alignment: .leading)
+                .padding(.top, 8)
+
+            if submissions.isEmpty {
+                Text("Open")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PetTheme.muted.opacity(0.58))
+                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                    .padding(.top, 8)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(submissions) { submission in
+                        NavigationLink {
+                            ScheduledTaskDetailView(submissionID: submission.id)
+                        } label: {
+                            ScheduledTaskTile(submission: submission)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+struct ScheduledTaskTile: View {
+    let submission: GroomingTaskSubmission
+
+    private var task: GroomingTask {
+        submission.taskSnapshot
+    }
+
+    private var isCompletedByDate: Bool {
+        task.targetDate < Calendar.current.startOfDay(for: Date()) && submission.status == .accepted
+    }
+
+    private var isInactive: Bool {
+        isCompletedByDate || submission.status == .completed || submission.status == .cancelled
+    }
+
+    private var displayStatus: String {
+        if isCompletedByDate {
+            return "Completed"
+        }
+        return submission.status.label
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(task.petSnapshot.name)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(isInactive ? PetTheme.muted : PetTheme.ink)
+                .strikethrough(isInactive, color: PetTheme.muted)
+                .lineLimit(1)
+
+            Text(task.service.rawValue)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isInactive ? PetTheme.muted.opacity(0.72) : PetTheme.coralDark)
+                .strikethrough(isInactive, color: PetTheme.muted)
+                .lineLimit(1)
+
+            Text(displayStatus)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(isInactive ? PetTheme.muted : PetTheme.sage)
+                .lineLimit(1)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isInactive ? Color.gray.opacity(0.16) : PetTheme.apricot.opacity(0.52))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isInactive ? Color.gray.opacity(0.24) : PetTheme.coral.opacity(0.4), lineWidth: 1)
+        )
+    }
+}
+
+struct ScheduledTaskDetailView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var showChat = false
+
+    let submissionID: UUID
+
+    private var submission: GroomingTaskSubmission? {
+        model.taskSubmission(id: submissionID)
+    }
+
+    var body: some View {
+        ScrollView {
+            if let submission {
+                let task = submission.taskSnapshot
+                let isPastCompleted = task.targetDate < Calendar.current.startOfDay(for: Date()) && submission.status == .accepted
+                let canCancel = submission.status == .accepted && !isPastCompleted
+                let canMessage = submission.status != .cancelled
+
+                VStack(spacing: 16) {
+                    ScreenTitle(
+                        title: "Scheduled task",
+                        subtitle: "Manage this accepted task card, cancel the work if needed, or message the pet owner."
+                    )
+
+                    VStack(alignment: .leading, spacing: 13) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(task.service.rawValue)
+                                    .font(.title2.weight(.bold))
+                                    .fontDesign(.rounded)
+                                    .foregroundStyle(PetTheme.ink)
+                                Text("\(task.petSnapshot.name) · \(task.timeWindow.displayTitle)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PetTheme.muted)
+                            }
+                            Spacer()
+                            Chip(text: isPastCompleted ? "Completed" : submission.status.label, color: scheduleStatusColor(submission, isPastCompleted: isPastCompleted))
+                        }
+
+                        detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
+                        detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
+                        detailRow("Style goal", value: task.styleGoal, icon: "scissors")
+                        if !task.specialNotes.isEmpty {
+                            detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
+                        }
+                        detailRow("Reference", value: task.referenceImageSlot.displayTitle, icon: task.styleReferenceSource?.iconName ?? "photo")
+                        detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
+                    }
+                    .taskCard()
+                    .padding(.horizontal, 18)
+
+                    HStack(spacing: 10) {
+                        Button(role: .destructive) {
+                            model.cancelTaskSubmission(id: submission.id)
+                        } label: {
+                            Label("Cancel Task", systemImage: "xmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(QuietButtonStyle())
+                        .disabled(!canCancel)
+                        .opacity(canCancel ? 1 : 0.55)
+
+                        Button {
+                            showChat = true
+                        } label: {
+                            Label("Message Owner", systemImage: "bubble.left.and.bubble.right.fill")
+                        }
+                        .buttonStyle(CoralButtonStyle())
+                        .disabled(!canMessage)
+                        .opacity(canMessage ? 1 : 0.55)
+                    }
+                    .padding(.horizontal, 18)
+                }
+                .padding(.bottom, 28)
+                .sheet(isPresented: $showChat) {
+                    TaskChatView(submissionID: submission.id)
+                        .environmentObject(model)
+                }
+            } else {
+                EmptyState(title: "Task not found", message: "This scheduled task card is no longer available.", systemImage: "calendar.badge.exclamationmark")
+            }
+        }
+        .appBackground()
+        .navigationTitle("Scheduled task")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ title: String, value: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func petDetail(_ pet: Pet) -> String {
+        [
+            pet.name,
+            pet.breed,
+            pet.coatType,
+            pet.coatCondition,
+            pet.weight.map { "\(Int($0)) lb" },
+            pet.temperament.joined(separator: ", ")
+        ]
+        .compactMap { $0 }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
+    private func scheduleStatusColor(_ submission: GroomingTaskSubmission, isPastCompleted: Bool) -> Color {
+        if isPastCompleted {
+            return Color.gray.opacity(0.34)
+        }
+
+        return switch submission.status {
+        case .accepted: PetTheme.mint
+        case .completed, .cancelled: Color.gray.opacity(0.34)
+        case .sent: PetTheme.apricot
+        case .declined: Color.gray.opacity(0.34)
+        }
+    }
+}
+
 struct GroomerTaskSubmissionCard: View {
     let submission: GroomingTaskSubmission
 
@@ -287,12 +693,12 @@ struct GroomerTaskSubmissionCard: View {
         switch submission.status {
         case .sent: PetTheme.apricot
         case .accepted: PetTheme.coral
-        case .declined: Color.gray.opacity(0.34)
+        case .declined, .completed, .cancelled: Color.gray.opacity(0.34)
         }
     }
 
     private var textColor: Color {
-        submission.status == .declined ? PetTheme.muted : PetTheme.ink
+        [.declined, .completed, .cancelled].contains(submission.status) ? PetTheme.muted : PetTheme.ink
     }
 
     private var dateText: String {
@@ -325,12 +731,12 @@ struct GroomerTaskSubmissionCard: View {
                 Label("Owner score \(task.ownerHiddenScore.displayValue)", systemImage: "lock.shield")
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(submission.status == .declined ? PetTheme.muted : PetTheme.sage)
+            .foregroundStyle([.declined, .completed, .cancelled].contains(submission.status) ? PetTheme.muted : PetTheme.sage)
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(submission.status == .declined ? Color.gray.opacity(0.14) : PetTheme.porcelain)
+                .fill([.declined, .completed, .cancelled].contains(submission.status) ? Color.gray.opacity(0.14) : PetTheme.porcelain)
                 .shadow(color: .black.opacity(submission.status == .accepted ? 0.11 : 0.05), radius: 12, x: 0, y: 6)
         )
         .overlay(
@@ -343,7 +749,7 @@ struct GroomerTaskSubmissionCard: View {
                 .frame(width: 4)
                 .padding(.vertical, 12)
         }
-        .opacity(submission.status == .declined ? 0.72 : 1)
+        .opacity([.declined, .completed, .cancelled].contains(submission.status) ? 0.72 : 1)
     }
 }
 
@@ -474,7 +880,7 @@ struct GroomingTaskSubmissionDetailView: View {
         switch status {
         case .sent: PetTheme.apricot
         case .accepted: PetTheme.mint
-        case .declined: Color.gray.opacity(0.34)
+        case .declined, .completed, .cancelled: Color.gray.opacity(0.34)
         }
     }
 }

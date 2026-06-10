@@ -32,9 +32,9 @@ struct RootView: View {
                 .tabItem { Label("Today", systemImage: "chart.line.uptrend.xyaxis") }
 
                 NavigationStack {
-                    MyGroomerProfileView()
+                    GroomerScheduleView()
                 }
-                .tabItem { Label("Profile", systemImage: "person.text.rectangle.fill") }
+                .tabItem { Label("Schedule", systemImage: "calendar") }
 
                 NavigationStack {
                     GroomerInboxView()
@@ -765,6 +765,15 @@ struct AccountView: View {
                     Text(model.activeRole == .petOwner ? "You are browsing as a pet owner. Switch to Groomer to manage the claimed Ava Park profile in this same app." : "You are using the groomer workspace for Ava Park. Switch back anytime to browse as a pet owner.")
                         .font(.caption)
                         .foregroundStyle(PetTheme.muted)
+
+                    if model.activeRole == .groomer {
+                        NavigationLink {
+                            MyGroomerProfileView()
+                        } label: {
+                            Label("My Groomer Profile", systemImage: "person.text.rectangle.fill")
+                        }
+                        .buttonStyle(CoralButtonStyle())
+                    }
 
                     Divider()
                     Label("No platform payment, booking calendar, or real-time chat in MVP", systemImage: "checklist")

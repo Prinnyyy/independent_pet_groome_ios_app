@@ -215,14 +215,14 @@ create table public.grooming_task_submissions (
   user_id uuid references public.users(id) on delete cascade,
   groomer_id uuid references public.groomers(id) on delete cascade,
   task_snapshot jsonb not null,
-  status text not null default 'sent' check (status in ('sent', 'accepted', 'declined')),
+  status text not null default 'sent' check (status in ('sent', 'accepted', 'declined', 'completed', 'cancelled')),
   sent_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now(),
   unique (grooming_task_id, groomer_id)
 );
 
 comment on table public.grooming_task_submissions is
-  'A generated task card sent to a specific groomer inbox. Declined submissions should be rendered disabled in groomer UI.';
+  'A generated task card sent to a specific groomer inbox. Accepted submissions appear on the groomer schedule; declined, completed, and cancelled submissions should render as inactive where appropriate.';
 
 create table public.grooming_task_messages (
   id uuid primary key default gen_random_uuid(),

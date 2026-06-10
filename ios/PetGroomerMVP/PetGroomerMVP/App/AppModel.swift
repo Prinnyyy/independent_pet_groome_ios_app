@@ -168,6 +168,25 @@ final class AppModel: ObservableObject {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    func scheduledTaskSubmissions(for groomer: Groomer) -> [GroomingTaskSubmission] {
+        groomingTaskSubmissions
+            .filter { submission in
+                submission.groomerID == groomer.id &&
+                    [.accepted, .completed, .cancelled].contains(submission.status)
+            }
+            .sorted {
+                if $0.taskSnapshot.targetDate == $1.taskSnapshot.targetDate {
+                    return $0.updatedAt > $1.updatedAt
+                }
+                return $0.taskSnapshot.targetDate < $1.taskSnapshot.targetDate
+            }
+    }
+
+    func scheduledTaskSubmissions(for groomer: Groomer, on date: Date) -> [GroomingTaskSubmission] {
+        scheduledTaskSubmissions(for: groomer)
+            .filter { Calendar.current.isDate($0.taskSnapshot.targetDate, inSameDayAs: date) }
+    }
+
     func taskSubmission(id: UUID) -> GroomingTaskSubmission? {
         groomingTaskSubmissions.first { $0.id == id }
     }
@@ -203,6 +222,10 @@ final class AppModel: ObservableObject {
         guard let index = groomingTaskSubmissions.firstIndex(where: { $0.id == id }) else { return }
         groomingTaskSubmissions[index].status = status
         groomingTaskSubmissions[index].updatedAt = Date()
+    }
+
+    func cancelTaskSubmission(id: UUID) {
+        updateTaskSubmissionStatus(id: id, status: .cancelled)
     }
 
     func messages(for submissionID: UUID) -> [TaskChatMessage] {
