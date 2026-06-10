@@ -451,16 +451,12 @@ struct GroomingTaskCard: View {
         task.targetDate.formatted(date: .abbreviated, time: .omitted)
     }
 
-    private var cardCode: String {
-        String(task.id.uuidString.prefix(8)).uppercased()
-    }
-
     private var referenceTitle: String {
-        task.styleReferenceSource?.displayTitle ?? "No style reference"
+        task.referenceImageSlot.displayTitle
     }
 
     private var referenceIcon: String {
-        task.styleReferenceSource?.iconName ?? "photo"
+        task.styleReferenceSource?.iconName ?? "photo.badge.plus"
     }
 
     var body: some View {
@@ -491,8 +487,8 @@ struct GroomingTaskCard: View {
             }
 
             HStack(spacing: 8) {
-                Chip(text: "Card \(cardCode)", color: PetTheme.sky)
                 Chip(text: "\(recommendedCount) groomer matches", color: PetTheme.mint)
+                Chip(text: task.referenceImageSlot.hasImage ? "Reference ready" : "Reference slot ready", color: PetTheme.sky)
             }
 
             Divider()
@@ -515,6 +511,7 @@ struct GroomingTaskCard: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Label(referenceTitle, systemImage: referenceIcon)
+                Label("\(task.petPhotoSnapshots.count) pet profile photos captured", systemImage: "photo.on.rectangle")
                 if !task.specialNotes.isEmpty {
                     Label(task.specialNotes, systemImage: "exclamationmark.bubble")
                 }

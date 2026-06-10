@@ -48,6 +48,12 @@ struct GroomerTodayView: View {
                     }
                     .padding(.horizontal, 18)
 
+                    if let task = model.currentGroomingTask {
+                        SectionHeader(title: "Task card lookup")
+                        GroomerTaskDataCard(task: task)
+                            .padding(.horizontal, 18)
+                    }
+
                     SectionHeader(title: "Newest inquiries")
                     let requests = model.quoteRequests(for: groomer)
                     if requests.isEmpty {
@@ -348,6 +354,56 @@ struct GroomerMetricCard: View {
                 .foregroundStyle(PetTheme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .taskCard()
+    }
+}
+
+struct GroomerTaskDataCard: View {
+    let task: GroomingTask
+
+    private var dateText: String {
+        task.targetDate.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var petDetails: String {
+        let pet = task.petSnapshot
+        return [
+            pet.name,
+            pet.breed,
+            pet.coatType,
+            pet.coatCondition,
+            pet.weight.map { "\(Int($0)) lb" }
+        ]
+        .compactMap { $0 }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.sequenceCode)
+                        .font(.title3.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                    Text("Generated task data container")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                }
+                Spacer()
+                Chip(text: "Owner score \(task.ownerHiddenScore.displayValue)", color: PetTheme.mint)
+            }
+
+            Label("\(task.service.rawValue) · \(dateText) · \(task.timeWindow.displayTitle)", systemImage: "calendar")
+            Label(petDetails, systemImage: "pawprint.fill")
+            Label(task.styleGoal, systemImage: "scissors")
+            Label(task.referenceImageSlot.displayTitle, systemImage: task.styleReferenceSource?.iconName ?? "photo.badge.plus")
+            Label("Pet snapshot includes \(task.petPhotoSnapshots.count) profile photos and full profile fields.", systemImage: "doc.text.magnifyingglass")
+            Label("Hidden score source: \(task.ownerHiddenScore.source)", systemImage: "lock.shield")
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(PetTheme.muted)
         .taskCard()
     }
 }

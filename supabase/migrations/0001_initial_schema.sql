@@ -170,6 +170,44 @@ create table public.contact_events (
   created_at timestamp with time zone default now()
 );
 
+create table public.grooming_tasks (
+  id uuid primary key default gen_random_uuid(),
+  sequence_code text not null unique,
+  user_id uuid references public.users(id) on delete cascade,
+  pet_id uuid references public.pets(id) on delete set null,
+  pet_snapshot jsonb not null,
+  pet_photo_snapshots jsonb not null default '[]'::jsonb,
+  service_type text not null,
+  appointment_date date not null,
+  time_window text not null,
+  style_goal text not null,
+  special_notes text,
+  reference_image_source text check (reference_image_source in ('camera', 'photo_library') or reference_image_source is null),
+  reference_image_url text,
+  reference_image_storage_path text,
+  reference_image_file_name text,
+  reference_image_mime_type text default 'image/jpeg',
+  reference_image_byte_size integer check (reference_image_byte_size is null or (reference_image_byte_size >= 0 and reference_image_byte_size <= 5242880)),
+  reference_image_max_bytes integer not null default 5242880 check (reference_image_max_bytes = 5242880),
+  owner_hidden_score numeric check (owner_hidden_score is null or (owner_hidden_score >= 1 and owner_hidden_score <= 5)),
+  owner_hidden_score_source text,
+  owner_hidden_score_last_evaluated_at timestamp with time zone,
+  status text default 'draft' check (status in ('draft', 'sent', 'accepted', 'cancelled', 'completed')),
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+comment on table public.grooming_tasks is
+  'Generated task-card data container. Stores pet profile snapshot, appointment details, reference image slot, quick lookup code, and groomer-only owner hidden score.';
+comment on column public.grooming_tasks.sequence_code is
+  'Internal random lookup code for groomer/admin retrieval. Do not expose in pet-owner UI or owner-facing API responses.';
+comment on column public.grooming_tasks.pet_snapshot is
+  'Frozen copy of the pet profile at task-card generation time, so later pet edits do not change the task request.';
+comment on column public.grooming_tasks.reference_image_byte_size is
+  'Reference image upload must be 5 MB or smaller.';
+comment on column public.grooming_tasks.owner_hidden_score is
+  'Private groomer-visible client score derived from the previous groomer evaluation. Do not expose in pet-owner API responses or owner RLS policies.';
+
 create table public.quote_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.users(id) on delete set null,
@@ -228,6 +266,10 @@ create index reviews_groomer_id_idx on public.reviews(groomer_id);
 create index favorites_user_id_idx on public.favorites(user_id);
 create index contact_events_groomer_id_idx on public.contact_events(groomer_id);
 create index contact_events_created_at_idx on public.contact_events(created_at);
+create index grooming_tasks_sequence_code_idx on public.grooming_tasks(sequence_code);
+create index grooming_tasks_user_id_idx on public.grooming_tasks(user_id);
+create index grooming_tasks_pet_id_idx on public.grooming_tasks(pet_id);
+create index grooming_tasks_status_idx on public.grooming_tasks(status);
 create index quote_requests_groomer_id_idx on public.quote_requests(groomer_id);
 create index reports_status_idx on public.reports(status);
 create index ai_usage_logs_feature_type_idx on public.ai_usage_logs(feature_type);
@@ -242,6 +284,9 @@ create trigger set_groomers_updated_at before update on public.groomers
 for each row execute function public.set_updated_at();
 
 create trigger set_reviews_updated_at before update on public.reviews
+for each row execute function public.set_updated_at();
+
+create trigger set_grooming_tasks_updated_at before update on public.grooming_tasks
 for each row execute function public.set_updated_at();
 
 create trigger set_quote_requests_updated_at before update on public.quote_requests
@@ -263,5 +308,5 @@ insert into public.feature_flags (key, is_enabled, description) values
   ('ai_style_preview_generation', false, 'Generate preview images. Out of MVP scope.');
 
 -- Recommended Supabase Storage buckets for the live backend:
--- pet-photos, groomer-photos, portfolio-images, review-images.
+-- pet-photos, groomer-photos, portfolio-images, review-images, task-reference-images.
 -- Add RLS policies after Supabase Auth roles and admin claims are finalized.

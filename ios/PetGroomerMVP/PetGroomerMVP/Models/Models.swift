@@ -143,18 +143,73 @@ enum GroomingTaskStyleReferenceSource: String, Codable, CaseIterable, Identifiab
     }
 }
 
-struct GroomingTask: Identifiable, Codable, Hashable {
+struct GroomingTaskReferenceImageSlot: Codable, Hashable {
+    static let maxByteSize = 5 * 1024 * 1024
+
+    var source: GroomingTaskStyleReferenceSource?
+    var localReference: String?
+    var storagePath: String?
+    var fileName: String?
+    var mimeType: String
+    var byteSize: Int?
+    var maxByteSize: Int
+
+    var hasImage: Bool {
+        source != nil
+    }
+
+    var isWithinSizeLimit: Bool {
+        guard let byteSize else { return true }
+        return byteSize <= maxByteSize
+    }
+
+    var displayTitle: String {
+        guard let source else { return "Reference image slot · max 5 MB" }
+        return "\(source.displayTitle) · max 5 MB"
+    }
+
+    static func reserved(source: GroomingTaskStyleReferenceSource?, sequenceCode: String) -> GroomingTaskReferenceImageSlot {
+        GroomingTaskReferenceImageSlot(
+            source: source,
+            localReference: source == nil ? nil : "mock://task-reference-\(sequenceCode.lowercased())",
+            storagePath: source == nil ? nil : "task-reference-images/\(sequenceCode.lowercased()).jpg",
+            fileName: source == nil ? nil : "\(sequenceCode.lowercased())-style-reference.jpg",
+            mimeType: "image/jpeg",
+            byteSize: source == nil ? nil : 1_250_000,
+            maxByteSize: Self.maxByteSize
+        )
+    }
+}
+
+struct GroomingTaskOwnerHiddenScore: Codable, Hashable {
+    var value: Double
+    var source: String
+    var lastEvaluatedAt: Date?
+
+    var displayValue: String {
+        String(format: "%.1f", value)
+    }
+}
+
+struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     let id: UUID
+    var sequenceCode: String
     var userID: UUID
     var petID: UUID
+    var petSnapshot: Pet
+    var petPhotoSnapshots: [PetPhoto]
     var service: GroomingTaskService
     var targetDate: Date
     var timeWindow: GroomingTaskTimeWindow
     var styleGoal: String
     var specialNotes: String
     var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var referenceImageSlot: GroomingTaskReferenceImageSlot
+    var ownerHiddenScore: GroomingTaskOwnerHiddenScore
     var createdAt: Date
 }
+
+typealias GroomingTask = GroomingTaskCardData
 
 struct GroomingTaskTemplate: Identifiable, Codable, Hashable {
     let id: UUID

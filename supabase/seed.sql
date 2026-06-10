@@ -186,6 +186,54 @@ insert into public.pet_photos (pet_id, user_id, image_url, photo_type, is_primar
   ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'mock://mochi-coat', 'coat_close_up', false),
   ('22222222-2222-2222-2222-222222222223', '11111111-1111-1111-1111-111111111111', 'mock://luna-side', 'side', true);
 
+insert into public.grooming_tasks (
+  id, sequence_code, user_id, pet_id, pet_snapshot, pet_photo_snapshots, service_type,
+  appointment_date, time_window, style_goal, special_notes, reference_image_source,
+  reference_image_url, reference_image_storage_path, reference_image_file_name,
+  reference_image_mime_type, reference_image_byte_size, owner_hidden_score,
+  owner_hidden_score_source, owner_hidden_score_last_evaluated_at, status
+) values (
+  '66666666-6666-6666-6666-666666666661',
+  'GT-MOCK24',
+  '11111111-1111-1111-1111-111111111111',
+  '22222222-2222-2222-2222-222222222222',
+  jsonb_build_object(
+    'id', '22222222-2222-2222-2222-222222222222',
+    'user_id', '11111111-1111-1111-1111-111111111111',
+    'name', 'Mochi',
+    'species', 'dog',
+    'breed', 'Maltipoo',
+    'breed_notes', 'Curly coat, compact body',
+    'weight', 15,
+    'age', 4,
+    'sex', 'Male',
+    'coat_type', 'Curly',
+    'coat_condition', 'Light matting',
+    'temperament', jsonb_build_array('Anxious', 'Afraid of dryers'),
+    'health_notes', 'Sensitive around ears',
+    'grooming_history', 'Regular grooming'
+  ),
+  jsonb_build_array(
+    jsonb_build_object('image_url', 'mock://mochi-front', 'photo_type', 'front', 'is_primary', true),
+    jsonb_build_object('image_url', 'mock://mochi-coat', 'photo_type', 'coat_close_up', 'is_primary', false)
+  ),
+  'Bath',
+  current_date + 1,
+  '8_am',
+  'Clean coat, bath, dry, and brush-out',
+  'Sensitive around ears and nervous around dryers.',
+  'photo_library',
+  'mock://task-reference-gt-mock24',
+  'task-reference-images/gt-mock24.jpg',
+  'gt-mock24-style-reference.jpg',
+  'image/jpeg',
+  1250000,
+  4.8,
+  'Last groomer client evaluation',
+  now() - interval '21 days',
+  'draft'
+) on conflict (id) do nothing;
+
 insert into public.reviews (
   user_id, groomer_id, pet_id, overall_rating, grooming_result_rating, communication_rating,
   patience_rating, punctuality_rating, price_transparency_rating, would_rebook, service_type, review_text, service_date

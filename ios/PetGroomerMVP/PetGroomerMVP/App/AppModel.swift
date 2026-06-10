@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var reports: [Report]
     @Published var featureFlags: [FeatureFlag]
     @Published var savedGroomingTaskTemplates: [GroomingTaskTemplate]
+    @Published var groomingTasks: [GroomingTask]
     @Published var currentGroomingTask: GroomingTask?
 
     private let authRepository: AuthRepository
@@ -59,6 +60,7 @@ final class AppModel: ObservableObject {
         self.reports = []
         self.featureFlags = MockData.featureFlags
         self.savedGroomingTaskTemplates = []
+        self.groomingTasks = []
         self.currentGroomingTask = nil
     }
 
@@ -114,7 +116,7 @@ final class AppModel: ObservableObject {
     }
 
     func pet(for task: GroomingTask) -> Pet? {
-        pets.first { $0.id == task.petID }
+        pets.first { $0.id == task.petID } ?? task.petSnapshot
     }
 
     func saveGroomingTask(
@@ -126,22 +128,34 @@ final class AppModel: ObservableObject {
         specialNotes: String,
         styleReferenceSource: GroomingTaskStyleReferenceSource?
     ) {
-        currentGroomingTask = GroomingTask(
+        let sequenceCode = Self.makeTaskSequenceCode()
+        let task = GroomingTask(
             id: UUID(),
+            sequenceCode: sequenceCode,
             userID: currentUser.id,
             petID: pet.id,
+            petSnapshot: pet,
+            petPhotoSnapshots: photos(for: pet),
             service: service,
             targetDate: targetDate,
             timeWindow: timeWindow,
             styleGoal: styleGoal,
             specialNotes: specialNotes,
             styleReferenceSource: styleReferenceSource,
+            referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(source: styleReferenceSource, sequenceCode: sequenceCode),
+            ownerHiddenScore: ownerHiddenScore(for: currentUser.id),
             createdAt: Date()
         )
+        currentGroomingTask = task
+        groomingTasks.insert(task, at: 0)
     }
 
     func cancelGroomingTask() {
         currentGroomingTask = nil
+    }
+
+    func groomingTask(sequenceCode: String) -> GroomingTask? {
+        groomingTasks.first { $0.sequenceCode.caseInsensitiveCompare(sequenceCode) == .orderedSame }
     }
 
     @discardableResult
@@ -193,6 +207,26 @@ final class AppModel: ObservableObject {
         if weight <= 20 { return "Small" }
         if weight <= 50 { return "Medium" }
         return "Large"
+    }
+
+    private static func makeTaskSequenceCode() -> String {
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        let suffix = String((0..<6).compactMap { _ in alphabet.randomElement() })
+        return "GT-\(suffix)"
+    }
+
+    private func ownerHiddenScore(for userID: UUID) -> GroomingTaskOwnerHiddenScore {
+        let lastVisibleReview = reviews
+            .filter { $0.userID == userID }
+            .sorted { $0.createdAt > $1.createdAt }
+            .first
+
+        let score = min(5.0, max(1.0, (lastVisibleReview?.overallRating ?? 4.6) - 0.1))
+        return GroomingTaskOwnerHiddenScore(
+            value: score,
+            source: "Last groomer client evaluation",
+            lastEvaluatedAt: lastVisibleReview?.createdAt
+        )
     }
 
     private func recommendationScore(groomer: Groomer, pet: Pet, task: GroomingTask) -> Double {

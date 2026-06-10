@@ -75,6 +75,7 @@ Recommended Storage buckets for the live backend:
 - `groomer-photos`
 - `portfolio-images`
 - `review-images`
+- `task-reference-images`
 
 RLS policies are not enabled in this skeleton because real auth roles, admin claims, and service-role usage need to be decided with the actual Supabase project. Add RLS before using live user data.
 
