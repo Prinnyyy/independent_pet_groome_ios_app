@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pet Groomer Admin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">PG</div>
+        <div>
+          <strong>Pet Groomer</strong>
+          <span>Admin skeleton</span>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Admin sections">
+        <button class="nav-item is-active" data-section="dashboard">Dashboard</button>
+        <button class="nav-item" data-section="groomers">Groomers</button>
+        <button class="nav-item" data-section="portfolio">Portfolio</button>
+        <button class="nav-item" data-section="reviews">Reviews</button>
+        <button class="nav-item" data-section="reports">Reports</button>
+        <button class="nav-item" data-section="users">Users</button>
+      </nav>
+
+      <div class="side-note">
+        <span class="status-dot"></span>
+        Mock data provider active
+      </div>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Independent groomer marketplace</p>
+          <h1 id="page-title">Dashboard</h1>
+        </div>
+        <button class="primary-action" id="seed-reset" type="button">Reset mock data</button>
+      </header>
+
+      <section id="app" class="content" aria-live="polite"></section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
