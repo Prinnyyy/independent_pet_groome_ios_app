@@ -163,44 +163,8 @@ struct HomeView: View {
 
     @ViewBuilder
     private var groomingTaskBuilder: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "clipboard.badge.plus")
-                    .foregroundStyle(PetTheme.coral)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Build today’s grooming task")
-                        .font(.headline.weight(.semibold))
-                        .fontDesign(.rounded)
-                    Text("Create a clear task card before choosing a groomer.")
-                        .font(.caption)
-                        .foregroundStyle(PetTheme.muted)
-                }
-                Spacer()
-                Button {
-                    if model.savedGroomingTaskTemplates.isEmpty {
-                        showNoTemplatesAlert = true
-                    } else {
-                        showTemplatePicker = true
-                    }
-                } label: {
-                    Label("Templates", systemImage: "bookmark")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(QuietButtonStyle())
-                .accessibilityLabel("Choose a saved task template")
-            }
-
-            if model.pets.isEmpty {
-                Text("Create a pet profile first so this task can use your pet list.")
-                    .font(.subheadline)
-                    .foregroundStyle(PetTheme.muted)
-                Button {
-                    showNewPet = true
-                } label: {
-                    Label("Create pet profile", systemImage: "plus.circle.fill")
-                }
-                .buttonStyle(CoralButtonStyle())
-            } else if let task = model.currentGroomingTask, let pet = model.pet(for: task), !isEditingTask {
+        Group {
+            if let task = model.currentGroomingTask, let pet = model.pet(for: task), !isEditingTask {
                 GroomingTaskCard(
                     task: task,
                     pet: pet,
@@ -222,12 +186,53 @@ struct HomeView: View {
                         templateSaved = false
                     }
                 )
+                .padding(.horizontal, 18)
             } else {
-                taskForm
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "clipboard.badge.plus")
+                            .foregroundStyle(PetTheme.coral)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Build today’s grooming task")
+                                .font(.headline.weight(.semibold))
+                                .fontDesign(.rounded)
+                            Text("Create a clear task card before choosing a groomer.")
+                                .font(.caption)
+                                .foregroundStyle(PetTheme.muted)
+                        }
+                        Spacer()
+                        Button {
+                            if model.savedGroomingTaskTemplates.isEmpty {
+                                showNoTemplatesAlert = true
+                            } else {
+                                showTemplatePicker = true
+                            }
+                        } label: {
+                            Label("Templates", systemImage: "bookmark")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(QuietButtonStyle())
+                        .accessibilityLabel("Choose a saved task template")
+                    }
+
+                    if model.pets.isEmpty {
+                        Text("Create a pet profile first so this task can use your pet list.")
+                            .font(.subheadline)
+                            .foregroundStyle(PetTheme.muted)
+                        Button {
+                            showNewPet = true
+                        } label: {
+                            Label("Create pet profile", systemImage: "plus.circle.fill")
+                        }
+                        .buttonStyle(CoralButtonStyle())
+                    } else {
+                        taskForm
+                    }
+                }
+                .taskCard()
+                .padding(.horizontal, 18)
             }
         }
-        .taskCard()
-        .padding(.horizontal, 18)
         .confirmationDialog("Add style reference", isPresented: $showStyleReferenceOptions, titleVisibility: .visible) {
             Button("Take Photo") {
                 styleReferenceSource = .camera
@@ -446,55 +451,134 @@ struct GroomingTaskCard: View {
         task.targetDate.formatted(date: .abbreviated, time: .omitted)
     }
 
-    private var summaryText: String {
-        var details = "\(pet.name)'s \(task.service.rawValue.lowercased()) task is ready for \(dateText) at \(task.timeWindow.displayTitle), with the goal \"\(task.styleGoal)\""
-        if let styleReferenceSource = task.styleReferenceSource {
-            details += " and \(styleReferenceSource.displayTitle.lowercased())"
-        }
-        if !task.specialNotes.isEmpty {
-            details += "; notes: \(task.specialNotes)"
-        }
-        details += ", so \(recommendedCount) groomers below are filtered for this request."
-        return details
+    private var cardCode: String {
+        String(task.id.uuidString.prefix(8)).uppercased()
+    }
+
+    private var referenceTitle: String {
+        task.styleReferenceSource?.displayTitle ?? "No style reference"
+    }
+
+    private var referenceIcon: String {
+        task.styleReferenceSource?.iconName ?? "photo"
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Task card ready")
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Grooming task")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.coralDark)
+                    Text(task.service.rawValue)
+                        .font(.title2.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(2)
+                    Text("For \(pet.name)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                }
+                Spacer()
+                Button(action: onSaveTemplate) {
+                    Image(systemName: isTemplateSaved ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(isTemplateSaved ? PetTheme.coral : Color.gray.opacity(0.75))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isTemplateSaved ? "Task template saved" : "Save task template")
+            }
+
+            HStack(spacing: 8) {
+                Chip(text: "Card \(cardCode)", color: PetTheme.sky)
+                Chip(text: "\(recommendedCount) groomer matches", color: PetTheme.mint)
+            }
+
+            Divider()
+                .overlay(PetTheme.line.opacity(0.45))
+
+            HStack(alignment: .top, spacing: 16) {
+                GroomingTaskFact(iconName: "calendar", title: "Date", value: dateText)
+                GroomingTaskFact(iconName: "clock", title: "Time", value: task.timeWindow.displayTitle)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Label("Style goal", systemImage: "scissors")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(PetTheme.coralDark)
-
-                Text(summaryText)
-                    .font(.subheadline.weight(.semibold))
+                Text(task.styleGoal)
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(PetTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.trailing, 32)
+            }
 
-                HStack(spacing: 10) {
-                    Button(action: onEdit) {
-                        Label("Edit", systemImage: "pencil")
-                    }
-                    .buttonStyle(QuietButtonStyle())
-
-                    Button(role: .destructive, action: onCancel) {
-                        Label("Cancel", systemImage: "xmark")
-                    }
-                    .buttonStyle(QuietButtonStyle())
-
-                    Spacer()
+            VStack(alignment: .leading, spacing: 7) {
+                Label(referenceTitle, systemImage: referenceIcon)
+                if !task.specialNotes.isEmpty {
+                    Label(task.specialNotes, systemImage: "exclamationmark.bubble")
                 }
             }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(PetTheme.muted)
 
-            Button(action: onSaveTemplate) {
-                Image(systemName: isTemplateSaved ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(isTemplateSaved ? PetTheme.coral : Color.gray.opacity(0.75))
-                    .frame(width: 30, height: 30)
+            HStack(spacing: 10) {
+                Button(action: onEdit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .buttonStyle(QuietButtonStyle())
+
+                Button(role: .destructive, action: onCancel) {
+                    Label("Cancel", systemImage: "xmark")
+                }
+                .buttonStyle(QuietButtonStyle())
+
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isTemplateSaved ? "Task template saved" : "Save task template")
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(PetTheme.porcelain)
+                .shadow(color: .black.opacity(0.07), radius: 14, x: 0, y: 7)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.8), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(PetTheme.coral)
+                .frame(width: 4)
+                .padding(.vertical, 14)
+        }
+    }
+}
+
+struct GroomingTaskFact: View {
+    let iconName: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: iconName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.subheadline.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(PetTheme.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
