@@ -88,27 +88,22 @@ struct HomeView: View {
         todayStart...Date.distantFuture
     }
 
-    private var groomerResults: [Groomer] {
-        if let task = model.currentGroomingTask {
-            return model.recommendedGroomers(for: task)
-        }
-        return Array(model.groomers.prefix(2))
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                ScreenTitle(
-                    title: "Find the actual groomer",
-                    subtitle: "Compare real portfolios, pet-fit details, price ranges, and direct contact options."
-                )
+                if model.currentGroomingTask == nil {
+                    ScreenTitle(
+                        title: "Find the actual groomer",
+                        subtitle: "Compare real portfolios, pet-fit details, price ranges, and direct contact options."
+                    )
+                }
 
                 groomingTaskBuilder
 
-                SectionHeader(title: model.currentGroomingTask == nil ? "Nearby groomers" : "Recommended for this task")
-                VStack(spacing: 14) {
-                    ForEach(groomerResults) { groomer in
-                        if let task = model.currentGroomingTask {
+                if let task = model.currentGroomingTask {
+                    SectionHeader(title: "Recommended for this task")
+                    VStack(spacing: 14) {
+                        ForEach(model.recommendedGroomers(for: task)) { groomer in
                             let submission = model.taskSubmission(for: task, groomer: groomer)
                             GroomerCard(
                                 groomer: groomer,
@@ -123,20 +118,6 @@ struct HomeView: View {
                                 secondaryIcon: "person.text.rectangle",
                                 onSecondaryAction: { selectedGroomerForDetails = groomer }
                             )
-                            .padding(.horizontal, 18)
-                        } else {
-                            NavigationLink {
-                                GroomerProfileView(groomer: groomer)
-                            } label: {
-                                GroomerCard(
-                                    groomer: groomer,
-                                    portfolio: model.portfolio(for: groomer),
-                                    isSaved: model.isFavorite(targetType: .groomer, targetID: groomer.id),
-                                    onSave: { model.toggleFavorite(targetType: .groomer, targetID: groomer.id) },
-                                    onContact: { model.logContact(groomer: groomer, pet: model.pets.first, method: .quoteRequest) }
-                                )
-                            }
-                            .buttonStyle(.plain)
                             .padding(.horizontal, 18)
                         }
                     }
