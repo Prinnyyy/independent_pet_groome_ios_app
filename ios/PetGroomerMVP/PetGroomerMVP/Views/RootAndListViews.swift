@@ -23,9 +23,9 @@ struct RootView: View {
                 .tabItem { Label("Pets", systemImage: "pawprint.fill") }
 
                 NavigationStack {
-                    SavedView()
+                    OrdersView()
                 }
-                .tabItem { Label("Saved", systemImage: "heart.fill") }
+                .tabItem { Label("Orders", systemImage: "doc.text.fill") }
             } else {
                 NavigationStack {
                     GroomerTodayView()
@@ -756,6 +756,16 @@ struct SearchView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SavedView()
+                } label: {
+                    Label("Saved", systemImage: "heart.fill")
+                }
+                .accessibilityLabel("Open saved groomers and portfolio")
+            }
+        }
     }
 }
 
@@ -810,6 +820,230 @@ struct SavedView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+    }
+}
+
+struct OrdersView: View {
+    @EnvironmentObject private var model: AppModel
+
+    private var orders: [CardExchangeOrderRecord] {
+        model.orderRecords(for: .petOwner)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                ScreenTitle(title: "Orders", subtitle: "Task-card orders created from cards you have sent to groomers.")
+
+                if orders.isEmpty {
+                    EmptyState(
+                        title: "No orders yet",
+                        message: "Orders appear after you send a task card to a groomer.",
+                        systemImage: "doc.text"
+                    )
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(orders) { order in
+                            NavigationLink {
+                                CustomerOrderDetailView(orderID: order.id)
+                            } label: {
+                                CustomerOrderRow(
+                                    order: order,
+                                    submission: model.taskSubmission(for: order),
+                                    groomer: model.groomer(for: order)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 18)
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 28)
+        }
+        .appBackground()
+    }
+}
+
+struct CustomerOrderRow: View {
+    let order: CardExchangeOrderRecord
+    let submission: GroomingTaskSubmission?
+    let groomer: Groomer?
+
+    private var task: GroomingTask? {
+        submission?.taskSnapshot
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: statusIcon)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 34, height: 34)
+                .background(statusColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(task?.service.rawValue ?? "Task card")
+                        .font(.headline.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(1)
+                    Spacer()
+                    Chip(text: order.status.label, color: statusColor.opacity(0.28))
+                }
+
+                Text(groomer?.name ?? "Groomer card")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.coralDark)
+                    .lineLimit(1)
+
+                Text(orderSubtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(PetTheme.muted)
+                    .lineLimit(2)
+
+                Text("Updated \(order.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(PetTheme.muted.opacity(0.86))
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted.opacity(0.72))
+                .padding(.top, 8)
+        }
+        .taskCard()
+    }
+
+    private var orderSubtitle: String {
+        guard let task else {
+            return "Task package and groomer card links saved"
+        }
+
+        return "\(task.petSnapshot.name) · \(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)"
+    }
+
+    private var statusIcon: String {
+        switch order.status {
+        case .waitingReply: "clock.fill"
+        case .accepted: "checkmark.seal.fill"
+        case .rejected: "xmark.seal.fill"
+        case .cancelled: "minus.circle.fill"
+        case .completed: "checkmark.circle.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch order.status {
+        case .waitingReply: PetTheme.apricot
+        case .accepted: PetTheme.mint
+        case .rejected, .cancelled, .completed: Color.gray.opacity(0.44)
+        }
+    }
+}
+
+struct CustomerOrderDetailView: View {
+    @EnvironmentObject private var model: AppModel
+
+    let orderID: UUID
+
+    private var order: CardExchangeOrderRecord? {
+        model.orderRecords(for: .petOwner).first { $0.id == orderID }
+    }
+
+    var body: some View {
+        ScrollView {
+            if let order {
+                let submission = model.taskSubmission(for: order)
+                let task = submission?.taskSnapshot
+                let groomer = model.groomer(for: order)
+
+                VStack(spacing: 16) {
+                    ScreenTitle(title: "Order details", subtitle: "This order links your sent task-card package with the groomer public card.")
+
+                    VStack(alignment: .leading, spacing: 13) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(task?.service.rawValue ?? "Task card order")
+                                    .font(.title2.weight(.bold))
+                                    .fontDesign(.rounded)
+                                    .foregroundStyle(PetTheme.ink)
+                                Text(groomer?.name ?? "Groomer public card")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PetTheme.muted)
+                            }
+                            Spacer()
+                            Chip(text: order.status.label, color: statusColor(order.status).opacity(0.28))
+                        }
+
+                        if let task {
+                            detailRow("Pet", value: task.petSnapshot.name, icon: "pawprint.fill")
+                            detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
+                            detailRow("Service", value: task.service.rawValue, icon: "scissors")
+                        }
+                        detailRow("Order store", value: order.localStoreLink.storageScope.displayTitle, icon: "doc.text.fill")
+                        detailRow("Task package", value: order.taskCardLink.compactURL, icon: "shippingbox.fill")
+                        detailRow("Groomer card", value: order.groomerCardLink.compactURL, icon: "person.text.rectangle")
+                    }
+                    .taskCard()
+                    .padding(.horizontal, 18)
+
+                    if let submission {
+                        NavigationLink {
+                            TaskChatView(
+                                submissionID: submission.id,
+                                senderRole: .petOwner,
+                                showsDoneButton: false
+                            )
+                            .environmentObject(model)
+                        } label: {
+                            Label("Message Groomer", systemImage: "bubble.left.and.bubble.right.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(CoralButtonStyle())
+                        .padding(.horizontal, 18)
+                    } else {
+                        Label("Chat is unavailable because the task submission is missing.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PetTheme.muted)
+                            .taskCard()
+                            .padding(.horizontal, 18)
+                    }
+                }
+                .padding(.bottom, 28)
+            } else {
+                EmptyState(title: "Order not found", message: "This order record is no longer available.", systemImage: "doc.badge.exclamationmark")
+            }
+        }
+        .appBackground()
+        .navigationTitle("Order")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detailRow(_ title: String, value: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func statusColor(_ status: CardExchangeOrderStatus) -> Color {
+        switch status {
+        case .waitingReply: PetTheme.apricot
+        case .accepted: PetTheme.mint
+        case .rejected, .cancelled, .completed: Color.gray.opacity(0.44)
+        }
     }
 }
 

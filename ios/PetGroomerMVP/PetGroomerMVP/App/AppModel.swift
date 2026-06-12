@@ -228,6 +228,14 @@ final class AppModel: ObservableObject {
         orderRecords(for: role).first { $0.exchangeID == exchangeID }
     }
 
+    func taskSubmission(for order: CardExchangeOrderRecord) -> GroomingTaskSubmission? {
+        groomingTaskSubmissions.first { $0.exchangeID == order.exchangeID }
+    }
+
+    func groomer(for order: CardExchangeOrderRecord) -> Groomer? {
+        groomers.first { $0.id == order.groomerID }
+    }
+
     @discardableResult
     func sendCurrentTask(to groomer: Groomer) -> GroomingTaskSubmission? {
         guard let task = currentGroomingTask else { return nil }

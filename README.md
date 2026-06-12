@@ -30,7 +30,7 @@ xcodebuild \
 
 The app includes one shared mobile experience for both customer users and groomers:
 
-- Pet owner mode: Home, Search, Pets, Saved, and Account tabs.
+- Pet owner mode: Home, Search, Pets, Orders, and Account tabs, with Saved moved into the Search toolbar.
 - Groomer mode: Today, Schedule, Inbox, Portfolio, and Account tabs.
 - Account role switcher so the same signed-in demo user can move between pet owner and groomer workspaces.
 - Mock sign-in/profile state with the demo user claiming the Ava Park groomer profile.
