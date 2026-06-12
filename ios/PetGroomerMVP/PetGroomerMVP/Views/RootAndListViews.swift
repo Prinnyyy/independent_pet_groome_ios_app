@@ -88,15 +88,14 @@ struct HomeView: View {
         todayStart...Date.distantFuture
     }
 
+    private var homeTransitionAnimation: Animation {
+        .smooth(duration: 0.46)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                if model.currentGroomingTask == nil {
-                    ScreenTitle(
-                        title: "Find the actual groomer",
-                        subtitle: "Compare real portfolios, pet-fit details, price ranges, and direct contact options."
-                    )
-                }
+                HomeHeroHeader(isCompact: model.currentGroomingTask != nil)
 
                 groomingTaskBuilder
 
@@ -122,28 +121,9 @@ struct HomeView: View {
                         }
                     }
                 }
-
-                SectionHeader(title: "Popular portfolio")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(model.portfolioItems) { item in
-                            NavigationLink {
-                                PortfolioDetailView(item: item)
-                            } label: {
-                                PortfolioCard(
-                                    item: item,
-                                    isSaved: model.isFavorite(targetType: .portfolio, targetID: item.id),
-                                    onSave: { model.toggleFavorite(targetType: .portfolio, targetID: item.id) }
-                                )
-                                .frame(width: 250)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                }
             }
             .padding(.bottom, 28)
+            .animation(homeTransitionAnimation, value: model.currentGroomingTask?.id)
         }
         .appBackground()
         .toolbar {
@@ -196,10 +176,12 @@ struct HomeView: View {
                         isEditingTask = true
                     },
                     onCancel: {
-                        clearTaskDraft()
-                        model.cancelGroomingTask()
-                        isEditingTask = true
-                        templateSaved = false
+                        withAnimation(homeTransitionAnimation) {
+                            clearTaskDraft()
+                            model.cancelGroomingTask()
+                            isEditingTask = true
+                            templateSaved = false
+                        }
                     }
                 )
                 .padding(.horizontal, 18)
@@ -394,17 +376,19 @@ struct HomeView: View {
         selectedDate = safeDate
         let cleanedStyleGoal = cleaned(styleGoal)
 
-        model.saveGroomingTask(
-            pet: selectedPet,
-            service: selectedService,
-            targetDate: safeDate,
-            timeWindow: selectedTimeWindow,
-            styleGoal: cleanedStyleGoal.isEmpty ? defaultStyleGoal(for: selectedService) : cleanedStyleGoal,
-            specialNotes: cleaned(specialNotes),
-            styleReferenceSource: styleReferenceSource
-        )
-        isEditingTask = false
-        templateSaved = false
+        withAnimation(homeTransitionAnimation) {
+            model.saveGroomingTask(
+                pet: selectedPet,
+                service: selectedService,
+                targetDate: safeDate,
+                timeWindow: selectedTimeWindow,
+                styleGoal: cleanedStyleGoal.isEmpty ? defaultStyleGoal(for: selectedService) : cleanedStyleGoal,
+                specialNotes: cleaned(specialNotes),
+                styleReferenceSource: styleReferenceSource
+            )
+            isEditingTask = false
+            templateSaved = false
+        }
     }
 
     private func populateDraft(from task: GroomingTask) {
@@ -451,6 +435,53 @@ struct HomeView: View {
 
     private func cleaned(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct HomeHeroHeader: View {
+    let isCompact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isCompact ? 0 : 6) {
+            Text("Find the actual groomer")
+                .animatedRoundedFont(size: isCompact ? 22 : 42, weight: .bold)
+                .foregroundStyle(PetTheme.ink)
+                .lineLimit(isCompact ? 1 : 2)
+                .minimumScaleFactor(0.76)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !isCompact {
+                Text("Compare real portfolios, pet-fit details, price ranges, and direct contact options.")
+                    .font(.subheadline)
+                    .foregroundStyle(PetTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .padding(.top, isCompact ? 4 : 12)
+        .animation(.smooth(duration: 0.46), value: isCompact)
+    }
+}
+
+private struct AnimatedRoundedFontModifier: AnimatableModifier {
+    var size: CGFloat
+    let weight: Font.Weight
+
+    var animatableData: CGFloat {
+        get { size }
+        set { size = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: .rounded))
+    }
+}
+
+private extension View {
+    func animatedRoundedFont(size: CGFloat, weight: Font.Weight) -> some View {
+        modifier(AnimatedRoundedFontModifier(size: size, weight: weight))
     }
 }
 
