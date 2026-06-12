@@ -200,8 +200,13 @@ create table public.grooming_tasks (
   appointment_date date not null,
   time_window text not null,
   search_area_label text default 'Current area',
+  search_address_source text not null default 'current_location' check (search_address_source in ('current_location', 'saved_profile_address', 'manual_entry')),
+  search_street_line_1 text,
+  search_street_line_2 text,
   search_area_city text,
+  search_area_state text,
   search_area_zip_code text,
+  search_area_country text default 'United States',
   search_radius_miles integer not null default 10 check (search_radius_miles > 0 and search_radius_miles <= 100),
   search_uses_current_location boolean not null default true,
   search_latitude double precision,
@@ -233,6 +238,8 @@ comment on column public.grooming_tasks.pet_snapshot is
   'Frozen copy of the pet profile at task-card generation time, so later pet edits do not change the task request.';
 comment on column public.grooming_tasks.search_radius_miles is
   'Customer-selected groomer discovery radius in miles. MVP uses city/service-area matching until real location services are connected.';
+comment on column public.grooming_tasks.search_address_source is
+  'Source of the task-card address: current location, saved profile address, or a manual standardized address.';
 comment on column public.grooming_tasks.reference_image_byte_size is
   'Reference image upload must be 5 MB or smaller.';
 comment on column public.grooming_tasks.owner_hidden_score is

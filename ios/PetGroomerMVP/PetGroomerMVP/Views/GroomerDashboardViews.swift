@@ -604,7 +604,7 @@ struct ScheduledTaskDetailView: View {
                         }
 
                         detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
-                        detailRow("Start near", value: task.searchArea.locationTitle, icon: "location.fill")
+                        detailRow("Address", value: task.searchArea.locationTitle, icon: task.searchArea.addressSource.iconName)
                         detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
                         detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
                         detailRow("Style goal", value: task.styleGoal, icon: "scissors")
@@ -816,7 +816,7 @@ struct GroomingTaskSubmissionDetailView: View {
 
                         detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
                         detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
-                        detailRow("Start near", value: task.searchArea.locationTitle, icon: "location.fill")
+                        detailRow("Address", value: task.searchArea.locationTitle, icon: task.searchArea.addressSource.iconName)
                         detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
                         detailRow("Style goal", value: task.styleGoal, icon: "scissors")
                         if !task.specialNotes.isEmpty {

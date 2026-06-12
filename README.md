@@ -37,6 +37,7 @@ The app includes one shared mobile experience for both customer users and groome
 - Pet profile create/edit/delete and photo picker flow with an 8-photo limit.
 - Groomer directory, filters, groomer profile pages, portfolio detail pages.
 - Favorites, contact event logging, task-card sending, mock chat with image placeholders, quote requests, reviews, reports, groomer inbox/schedule management, groomer profile editing, and groomer portfolio creation.
+- Customer account profile editing for local name, gender, address, phone, and email; task-card address selection can use current location, saved profile address, or MapKit-backed manual address entry.
 - Disabled AI feature flags and an `AIService` protocol with placeholder behavior.
 
 The live Supabase integration should replace the `Mock*Repository` implementations with the `Supabase*Repository` placeholders after project URL, anon key, auth, storage, and RLS policies are finalized.

@@ -20,6 +20,66 @@ struct UserProfile: Identifiable, Codable, Hashable {
     var updatedAt: Date
 }
 
+enum UserGender: String, Codable, CaseIterable, Identifiable {
+    case notSpecified = "Not specified"
+    case female = "Female"
+    case male = "Male"
+    case nonBinary = "Non-binary"
+
+    var id: String { rawValue }
+}
+
+struct ProfileAddress: Codable, Hashable {
+    var streetLine1: String
+    var streetLine2: String
+    var city: String
+    var state: String
+    var postalCode: String
+    var country: String
+
+    var isEmpty: Bool {
+        [streetLine1, streetLine2, city, state, postalCode, country]
+            .allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    var compactTitle: String {
+        if !streetLine1.isEmpty {
+            return [streetLine1, city, state, postalCode]
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+        }
+
+        return [city, state, postalCode]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    var formattedAddress: String {
+        [
+            [streetLine1, streetLine2].filter { !$0.isEmpty }.joined(separator: " "),
+            [city, state, postalCode].filter { !$0.isEmpty }.joined(separator: ", "),
+            country
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n")
+    }
+
+    static var empty: ProfileAddress {
+        ProfileAddress(streetLine1: "", streetLine2: "", city: "", state: "", postalCode: "", country: "United States")
+    }
+}
+
+struct CustomerPersonalProfile: Identifiable, Codable, Hashable {
+    let id: UUID
+    var userID: UUID
+    var fullName: String
+    var gender: UserGender
+    var address: ProfileAddress
+    var phone: String
+    var email: String
+    var updatedAt: Date
+}
+
 enum PetSpecies: String, Codable, CaseIterable, Identifiable {
     case dog = "Dog"
     case cat = "Cat"
@@ -191,17 +251,52 @@ struct GroomingTaskOwnerHiddenScore: Codable, Hashable {
     }
 }
 
+enum GroomingTaskAddressSource: String, Codable, CaseIterable, Identifiable, Hashable {
+    case currentLocation = "current_location"
+    case savedProfileAddress = "saved_profile_address"
+    case manualEntry = "manual_entry"
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .currentLocation: "Current location"
+        case .savedProfileAddress: "Saved address"
+        case .manualEntry: "Manual address"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .currentLocation: "location.fill"
+        case .savedProfileAddress: "house.fill"
+        case .manualEntry: "mappin.and.ellipse"
+        }
+    }
+}
+
 struct GroomingTaskSearchArea: Codable, Hashable {
     var label: String
+    var addressSource: GroomingTaskAddressSource
+    var streetLine1: String
+    var streetLine2: String
     var city: String
+    var state: String
     var zipCode: String
+    var country: String
     var radiusMiles: Int
     var usesCurrentLocation: Bool
     var latitude: Double?
     var longitude: Double?
 
     var locationTitle: String {
-        [city, zipCode].filter { !$0.isEmpty }.joined(separator: ", ")
+        let address = [streetLine1, city, state, zipCode]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+        if !address.isEmpty {
+            return address
+        }
+        return label
     }
 
     var rangeTitle: String {

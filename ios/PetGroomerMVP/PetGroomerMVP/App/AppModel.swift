@@ -5,6 +5,7 @@ import SwiftUI
 final class AppModel: ObservableObject {
     @Published var activeRole: AppRole
     @Published var currentUser: UserProfile
+    @Published var customerPersonalProfile: CustomerPersonalProfile
     @Published var pets: [Pet]
     @Published var petPhotos: [PetPhoto]
     @Published var groomers: [Groomer]
@@ -53,6 +54,23 @@ final class AppModel: ObservableObject {
 
         self.activeRole = .petOwner
         self.currentUser = MockData.currentUser
+        self.customerPersonalProfile = CustomerPersonalProfile(
+            id: UUID(),
+            userID: MockData.currentUser.id,
+            fullName: MockData.currentUser.displayName,
+            gender: .notSpecified,
+            address: ProfileAddress(
+                streetLine1: "120 W Wilshire Ave",
+                streetLine2: "",
+                city: MockData.currentUser.city,
+                state: "CA",
+                postalCode: MockData.currentUser.zipCode,
+                country: "United States"
+            ),
+            phone: "714-555-0190",
+            email: MockData.currentUser.email ?? "taylor@example.com",
+            updatedAt: Date()
+        )
         self.pets = MockData.pets
         self.petPhotos = MockData.petPhotos
         self.groomers = MockData.groomers
@@ -121,6 +139,18 @@ final class AppModel: ObservableObject {
             let catMatch = !acceptsCatsOnly || groomer.acceptsCats
             return queryMatch && cityMatch && verifiedMatch && catMatch
         }
+    }
+
+    func updateCustomerPersonalProfile(_ profile: CustomerPersonalProfile) {
+        var updatedProfile = profile
+        updatedProfile.updatedAt = Date()
+        customerPersonalProfile = updatedProfile
+
+        currentUser.displayName = updatedProfile.fullName
+        currentUser.email = updatedProfile.email
+        currentUser.city = updatedProfile.address.city
+        currentUser.zipCode = updatedProfile.address.postalCode
+        currentUser.updatedAt = updatedProfile.updatedAt
     }
 
     func pet(for task: GroomingTask) -> Pet? {

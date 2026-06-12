@@ -1,3 +1,4 @@
+import MapKit
 import PhotosUI
 import SwiftUI
 
@@ -65,6 +66,8 @@ struct HomeView: View {
     @State private var selectedDate = Date()
     @State private var selectedTimeWindow: GroomingTaskTimeWindow = .eightAM
     @State private var selectedSearchRadiusMiles = 10
+    @State private var selectedAddressSource: GroomingTaskAddressSource = .currentLocation
+    @State private var manualTaskAddress: ProfileAddress = .empty
     @State private var styleGoal = ""
     @State private var specialNotes = ""
     @State private var styleReferenceSource: GroomingTaskStyleReferenceSource?
@@ -76,6 +79,7 @@ struct HomeView: View {
     @State private var showTemplatePicker = false
     @State private var showNoTemplatesAlert = false
     @State private var showTemplateSavedAlert = false
+    @State private var showAddressPicker = false
     @State private var selectedGroomerForDetails: Groomer?
     @State private var showChatInbox = false
 
@@ -100,13 +104,41 @@ struct HomeView: View {
         [3, 5, 10, 15, 25, 50]
     }
 
-    private var currentSearchArea: GroomingTaskSearchArea {
-        GroomingTaskSearchArea(
-            label: "Current area",
+    private var currentLocationAddress: ProfileAddress {
+        ProfileAddress(
+            streetLine1: "",
+            streetLine2: "",
             city: model.currentUser.city,
-            zipCode: model.currentUser.zipCode,
+            state: "",
+            postalCode: model.currentUser.zipCode,
+            country: "United States"
+        )
+    }
+
+    private var selectedTaskAddress: ProfileAddress {
+        switch selectedAddressSource {
+        case .currentLocation:
+            currentLocationAddress
+        case .savedProfileAddress:
+            model.customerPersonalProfile.address.isEmpty ? currentLocationAddress : model.customerPersonalProfile.address
+        case .manualEntry:
+            manualTaskAddress.isEmpty ? currentLocationAddress : manualTaskAddress
+        }
+    }
+
+    private var currentSearchArea: GroomingTaskSearchArea {
+        let address = selectedTaskAddress
+        return GroomingTaskSearchArea(
+            label: selectedAddressSource.displayTitle,
+            addressSource: selectedAddressSource,
+            streetLine1: address.streetLine1,
+            streetLine2: address.streetLine2,
+            city: address.city.isEmpty ? model.currentUser.city : address.city,
+            state: address.state,
+            zipCode: address.postalCode.isEmpty ? model.currentUser.zipCode : address.postalCode,
+            country: address.country,
             radiusMiles: selectedSearchRadiusMiles,
-            usesCurrentLocation: true,
+            usesCurrentLocation: selectedAddressSource == .currentLocation,
             latitude: nil,
             longitude: nil
         )
@@ -161,6 +193,13 @@ struct HomeView: View {
         .sheet(isPresented: $showChatInbox) {
             TaskChatInboxView(viewerRole: .petOwner)
                 .environmentObject(model)
+        }
+        .sheet(isPresented: $showAddressPicker) {
+            TaskAddressPickerView(
+                selectedSource: $selectedAddressSource,
+                manualAddress: $manualTaskAddress
+            )
+            .environmentObject(model)
         }
         .navigationDestination(item: $selectedGroomerForDetails) { groomer in
             GroomerProfileView(groomer: groomer)
@@ -335,12 +374,23 @@ struct HomeView: View {
             }
 
             HStack(spacing: 10) {
-                taskField(title: "Start near") {
-                    Label(currentSearchArea.locationTitle, systemImage: "location.fill")
+                taskField(title: "Address") {
+                    Button {
+                        showAddressPicker = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: selectedAddressSource.iconName)
+                            Text(currentSearchArea.locationTitle)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.76)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                        }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(PetTheme.coral)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.76)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 taskField(title: "Search range") {
@@ -447,6 +497,15 @@ struct HomeView: View {
         selectedDate = task.targetDate < todayStart ? todayStart : task.targetDate
         selectedTimeWindow = task.timeWindow
         selectedSearchRadiusMiles = task.searchArea.radiusMiles
+        selectedAddressSource = task.searchArea.addressSource
+        manualTaskAddress = ProfileAddress(
+            streetLine1: task.searchArea.streetLine1,
+            streetLine2: task.searchArea.streetLine2,
+            city: task.searchArea.city,
+            state: task.searchArea.state,
+            postalCode: task.searchArea.zipCode,
+            country: task.searchArea.country
+        )
         styleGoal = task.styleGoal
         specialNotes = task.specialNotes
         styleReferenceSource = task.styleReferenceSource
@@ -458,6 +517,8 @@ struct HomeView: View {
         selectedDate = todayStart
         selectedTimeWindow = .eightAM
         selectedSearchRadiusMiles = 10
+        selectedAddressSource = .currentLocation
+        manualTaskAddress = .empty
         styleGoal = ""
         specialNotes = ""
         styleReferenceSource = nil
@@ -472,6 +533,8 @@ struct HomeView: View {
         selectedDate = todayStart
         selectedTimeWindow = template.timeWindow
         selectedSearchRadiusMiles = template.searchArea.radiusMiles
+        selectedAddressSource = template.searchArea.addressSource == .manualEntry ? .currentLocation : template.searchArea.addressSource
+        manualTaskAddress = .empty
         styleGoal = template.styleGoal
         specialNotes = template.specialNotes
         styleReferenceSource = template.styleReferenceSource
@@ -599,7 +662,7 @@ struct GroomingTaskCard: View {
             }
 
             HStack(alignment: .top, spacing: 16) {
-                GroomingTaskFact(iconName: "location.fill", title: "Start near", value: task.searchArea.locationTitle)
+                GroomingTaskFact(iconName: task.searchArea.addressSource.iconName, title: "Address", value: task.searchArea.locationTitle)
                 GroomingTaskFact(iconName: "scope", title: "Search range", value: task.searchArea.rangeTitle)
             }
 
@@ -681,6 +744,311 @@ struct GroomingTaskFact: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct TaskAddressPickerView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedSource: GroomingTaskAddressSource
+    @Binding var manualAddress: ProfileAddress
+    @State private var showsManualEntry = false
+
+    private var savedAddress: ProfileAddress {
+        model.customerPersonalProfile.address
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if showsManualEntry {
+                    ManualAddressEntryView(initialAddress: manualAddress) { address in
+                        manualAddress = address
+                        selectedSource = .manualEntry
+                        dismiss()
+                    } onCancel: {
+                        showsManualEntry = false
+                    }
+                } else {
+                    addressOptions
+                }
+            }
+            .navigationTitle("Task address")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !showsManualEntry {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+
+    private var addressOptions: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                addressOption(
+                    title: "Current Location",
+                    subtitle: [model.currentUser.city, model.currentUser.zipCode].filter { !$0.isEmpty }.joined(separator: ", "),
+                    icon: "location.fill",
+                    isSelected: selectedSource == .currentLocation
+                ) {
+                    selectedSource = .currentLocation
+                    dismiss()
+                }
+
+                addressOption(
+                    title: "Saved Profile Address",
+                    subtitle: savedAddress.isEmpty ? "Add an address from Account first" : savedAddress.compactTitle,
+                    icon: "house.fill",
+                    isSelected: selectedSource == .savedProfileAddress
+                ) {
+                    guard !savedAddress.isEmpty else { return }
+                    selectedSource = .savedProfileAddress
+                    dismiss()
+                }
+                .opacity(savedAddress.isEmpty ? 0.55 : 1)
+
+                addressOption(
+                    title: manualAddress.isEmpty ? "Enter a New Address" : "Manual Address",
+                    subtitle: manualAddress.isEmpty ? "Use address search or standard address fields" : manualAddress.compactTitle,
+                    icon: "mappin.and.ellipse",
+                    isSelected: selectedSource == .manualEntry
+                ) {
+                    showsManualEntry = true
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .appBackground()
+    }
+
+    private func addressOption(title: String, subtitle: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(isSelected ? PetTheme.coral : PetTheme.sage)
+                    .frame(width: 36, height: 36)
+                    .background((isSelected ? PetTheme.coral : PetTheme.sage).opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                    Text(subtitle.isEmpty ? "No address detail available" : subtitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "chevron.right")
+                    .foregroundStyle(isSelected ? PetTheme.coral : PetTheme.muted)
+            }
+            .taskCard()
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ManualAddressEntryView: View {
+    @StateObject private var completer = AddressSearchCompleter()
+    @State private var draft: ProfileAddress
+    @State private var isResolvingSuggestion = false
+
+    let onSave: (ProfileAddress) -> Void
+    let onCancel: () -> Void
+
+    init(initialAddress: ProfileAddress, onSave: @escaping (ProfileAddress) -> Void, onCancel: @escaping () -> Void) {
+        _draft = State(initialValue: initialAddress.isEmpty ? .empty : initialAddress)
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    private var canSave: Bool {
+        !draft.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !draft.city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !draft.state.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !draft.postalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Search address")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.muted)
+                    TextField("Street address, city, ZIP", text: $completer.query)
+                        .textInputAutocapitalization(.words)
+                        .padding(12)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if isResolvingSuggestion {
+                    Label("Loading address details", systemImage: "location.magnifyingglass")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                }
+
+                if !completer.results.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, result in
+                            Button {
+                                apply(result)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(result.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(PetTheme.ink)
+                                    if !result.subtitle.isEmpty {
+                                        Text(result.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(PetTheme.muted)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(11)
+                                .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                VStack(spacing: 10) {
+                    addressTextField("Street address", text: $draft.streetLine1)
+                    addressTextField("Apt, suite, unit", text: $draft.streetLine2)
+                    addressTextField("City", text: $draft.city)
+                    HStack(spacing: 10) {
+                        addressTextField("State", text: $draft.state)
+                        addressTextField("ZIP", text: $draft.postalCode)
+                    }
+                    addressTextField("Country", text: $draft.country)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .buttonStyle(QuietButtonStyle())
+
+                    Button {
+                        onSave(cleaned(draft))
+                    } label: {
+                        Label("Use Address", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(CoralButtonStyle())
+                    .disabled(!canSave)
+                    .opacity(canSave ? 1 : 0.55)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+        }
+        .appBackground()
+    }
+
+    private func addressTextField(_ title: String, text: Binding<String>) -> some View {
+        TextField(title, text: text)
+            .textInputAutocapitalization(.words)
+            .padding(12)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func apply(_ completion: MKLocalSearchCompletion) {
+        isResolvingSuggestion = true
+        Task {
+            let address = await resolvedAddress(from: completion)
+            await MainActor.run {
+                draft = address
+                completer.query = address.compactTitle
+                completer.results = []
+                isResolvingSuggestion = false
+            }
+        }
+    }
+
+    private func resolvedAddress(from completion: MKLocalSearchCompletion) async -> ProfileAddress {
+        let request = MKLocalSearch.Request(completion: completion)
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            if let item = response.mapItems.first {
+                let placemark = item.placemark
+                return cleaned(
+                    ProfileAddress(
+                        streetLine1: [placemark.subThoroughfare, placemark.thoroughfare].compactMap { $0 }.joined(separator: " "),
+                        streetLine2: "",
+                        city: placemark.locality ?? "",
+                        state: placemark.administrativeArea ?? "",
+                        postalCode: placemark.postalCode ?? "",
+                        country: placemark.country ?? "United States"
+                    )
+                )
+            }
+        } catch {
+            return fallbackAddress(from: completion)
+        }
+
+        return fallbackAddress(from: completion)
+    }
+
+    private func fallbackAddress(from completion: MKLocalSearchCompletion) -> ProfileAddress {
+        cleaned(
+            ProfileAddress(
+                streetLine1: completion.title,
+                streetLine2: "",
+                city: "",
+                state: "",
+                postalCode: "",
+                country: "United States"
+            )
+        )
+    }
+
+    private func cleaned(_ address: ProfileAddress) -> ProfileAddress {
+        ProfileAddress(
+            streetLine1: address.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines),
+            streetLine2: address.streetLine2.trimmingCharacters(in: .whitespacesAndNewlines),
+            city: address.city.trimmingCharacters(in: .whitespacesAndNewlines),
+            state: address.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            postalCode: address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            country: address.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "United States" : address.country.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+}
+
+final class AddressSearchCompleter: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    @Published var query = "" {
+        didSet {
+            completer.queryFragment = query
+        }
+    }
+    @Published var results: [MKLocalSearchCompletion] = []
+
+    private let completer: MKLocalSearchCompleter
+
+    override init() {
+        completer = MKLocalSearchCompleter()
+        super.init()
+        completer.resultTypes = .address
+        completer.delegate = self
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        DispatchQueue.main.async {
+            self.results = completer.results
+        }
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.results = []
+        }
     }
 }
 
@@ -990,18 +1358,30 @@ struct CustomerOrderDetailView: View {
                     .padding(.horizontal, 18)
 
                     if let submission {
-                        NavigationLink {
-                            TaskChatView(
-                                submissionID: submission.id,
-                                senderRole: .petOwner,
-                                showsDoneButton: false
-                            )
-                            .environmentObject(model)
-                        } label: {
-                            Label("Message Groomer", systemImage: "bubble.left.and.bubble.right.fill")
-                                .frame(maxWidth: .infinity)
+                        HStack(spacing: 10) {
+                            NavigationLink {
+                                TaskChatView(
+                                    submissionID: submission.id,
+                                    senderRole: .petOwner,
+                                    showsDoneButton: false
+                                )
+                                .environmentObject(model)
+                            } label: {
+                                Label("Message", systemImage: "bubble.left.and.bubble.right.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(CoralButtonStyle())
+
+                            if let groomer {
+                                NavigationLink {
+                                    GroomerProfileView(groomer: groomer)
+                                } label: {
+                                    Label("Profile", systemImage: "person.text.rectangle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(QuietButtonStyle())
+                            }
                         }
-                        .buttonStyle(CoralButtonStyle())
                         .padding(.horizontal, 18)
                     } else {
                         Label("Chat is unavailable because the task submission is missing.", systemImage: "exclamationmark.triangle.fill")
@@ -1049,6 +1429,7 @@ struct CustomerOrderDetailView: View {
 
 struct AccountView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showPersonalProfileEditor = false
 
     var body: some View {
         ScrollView {
@@ -1100,6 +1481,25 @@ struct AccountView: View {
                 .taskCard()
                 .padding(.horizontal, 18)
 
+                SectionHeader(title: "Personal information")
+                VStack(alignment: .leading, spacing: 12) {
+                    profileRow("Name", value: model.customerPersonalProfile.fullName, icon: "person.fill")
+                    profileRow("Gender", value: model.customerPersonalProfile.gender.rawValue, icon: "person.text.rectangle")
+                    profileRow("Address", value: model.customerPersonalProfile.address.formattedAddress, icon: "house.fill")
+                    profileRow("Phone", value: model.customerPersonalProfile.phone, icon: "phone.fill")
+                    profileRow("Email", value: model.customerPersonalProfile.email, icon: "envelope.fill")
+
+                    Button {
+                        showPersonalProfileEditor = true
+                    } label: {
+                        Label("Edit Personal Info", systemImage: "pencil")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                }
+                .taskCard()
+                .padding(.horizontal, 18)
+
                 SectionHeader(title: "AI-ready flags")
                 VStack(spacing: 10) {
                     ForEach(model.featureFlags) { flag in
@@ -1128,5 +1528,122 @@ struct AccountView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .sheet(isPresented: $showPersonalProfileEditor) {
+            CustomerPersonalProfileEditorView(profile: model.customerPersonalProfile) { profile in
+                model.updateCustomerPersonalProfile(profile)
+            }
+        }
+    }
+
+    private func profileRow(_ title: String, value: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value.isEmpty ? "Not set" : value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct CustomerPersonalProfileEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: CustomerPersonalProfile
+
+    let onSave: (CustomerPersonalProfile) -> Void
+
+    init(profile: CustomerPersonalProfile, onSave: @escaping (CustomerPersonalProfile) -> Void) {
+        _draft = State(initialValue: profile)
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    profileTextField("Name", text: $draft.fullName)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Gender")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PetTheme.muted)
+                        Picker("Gender", selection: $draft.gender) {
+                            ForEach(UserGender.allCases) { gender in
+                                Text(gender.rawValue).tag(gender)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    profileTextField("Street address", text: $draft.address.streetLine1)
+                    profileTextField("Apt, suite, unit", text: $draft.address.streetLine2)
+                    profileTextField("City", text: $draft.address.city)
+                    HStack(spacing: 10) {
+                        profileTextField("State", text: $draft.address.state)
+                        profileTextField("ZIP", text: $draft.address.postalCode)
+                    }
+                    profileTextField("Country", text: $draft.address.country)
+                    profileTextField("Phone", text: $draft.phone)
+                        .keyboardType(.phonePad)
+                    profileTextField("Email", text: $draft.email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+            .appBackground()
+            .navigationTitle("Personal Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(cleaned(draft))
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func profileTextField(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            TextField(title, text: text)
+                .textInputAutocapitalization(.words)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func cleaned(_ profile: CustomerPersonalProfile) -> CustomerPersonalProfile {
+        var cleanedProfile = profile
+        cleanedProfile.fullName = profile.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleanedProfile.phone = profile.phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleanedProfile.email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleanedProfile.address = ProfileAddress(
+            streetLine1: profile.address.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines),
+            streetLine2: profile.address.streetLine2.trimmingCharacters(in: .whitespacesAndNewlines),
+            city: profile.address.city.trimmingCharacters(in: .whitespacesAndNewlines),
+            state: profile.address.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            postalCode: profile.address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            country: profile.address.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "United States" : profile.address.country.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        return cleanedProfile
     }
 }
