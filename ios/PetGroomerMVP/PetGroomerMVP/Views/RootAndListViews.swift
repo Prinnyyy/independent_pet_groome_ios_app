@@ -586,7 +586,7 @@ struct GroomingTaskCard: View {
             }
 
             HStack(spacing: 8) {
-                Chip(text: "\(recommendedCount) groomer matches", color: PetTheme.mint)
+                Chip(text: "\(recommendedCount) public groomer cards matched", color: PetTheme.mint)
                 Chip(text: task.referenceImageSlot.hasImage ? "Reference ready" : "Reference slot ready", color: PetTheme.sky)
             }
 
@@ -614,6 +614,7 @@ struct GroomingTaskCard: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
+                Label("Saved as a local task-card package", systemImage: "shippingbox.fill")
                 Label(referenceTitle, systemImage: referenceIcon)
                 Label("\(task.petPhotoSnapshots.count) pet profile photos captured", systemImage: "photo.on.rectangle")
                 if !task.specialNotes.isEmpty {

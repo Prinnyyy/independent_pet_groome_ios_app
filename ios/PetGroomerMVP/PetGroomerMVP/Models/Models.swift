@@ -209,6 +209,102 @@ struct GroomingTaskSearchArea: Codable, Hashable {
     }
 }
 
+enum InformationCardKind: String, Codable, CaseIterable, Identifiable {
+    case customerTask = "customer_task"
+    case groomerProfile = "groomer_profile"
+    case exchangeOrder = "exchange_order"
+
+    var id: String { rawValue }
+}
+
+enum CardStorageScope: String, Codable, CaseIterable, Identifiable {
+    case customerLocalPackage = "customer_local_package"
+    case publicServerCard = "public_server_card"
+    case groomerInboxPackage = "groomer_inbox_package"
+    case customerOrderStore = "customer_order_store"
+    case groomerOrderStore = "groomer_order_store"
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .customerLocalPackage: "Customer local task package"
+        case .publicServerCard: "Public groomer card"
+        case .groomerInboxPackage: "Groomer inbox package"
+        case .customerOrderStore: "Customer order store"
+        case .groomerOrderStore: "Groomer order store"
+        }
+    }
+}
+
+struct CardAccessLink: Identifiable, Codable, Hashable {
+    let id: UUID
+    var cardKind: InformationCardKind
+    var storageScope: CardStorageScope
+    var ownerRole: AppRole
+    var ownerEntityID: UUID
+    var cardID: UUID
+    var url: String
+    var version: Int
+    var createdAt: Date
+
+    var compactURL: String {
+        guard url.count > 44 else { return url }
+        return "\(url.prefix(27))...\(url.suffix(12))"
+    }
+}
+
+enum CardExchangeOrderStatus: String, Codable, CaseIterable, Identifiable {
+    case waitingReply = "waiting_reply"
+    case accepted
+    case rejected
+    case cancelled
+    case completed
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .waitingReply: "Waiting reply"
+        case .accepted: "Accepted"
+        case .rejected: "Rejected"
+        case .cancelled: "Cancelled"
+        case .completed: "Completed"
+        }
+    }
+}
+
+extension CardExchangeOrderStatus {
+    init(submissionStatus: GroomingTaskSubmissionStatus) {
+        switch submissionStatus {
+        case .sent:
+            self = .waitingReply
+        case .accepted:
+            self = .accepted
+        case .declined:
+            self = .rejected
+        case .cancelled:
+            self = .cancelled
+        case .completed:
+            self = .completed
+        }
+    }
+}
+
+struct CardExchangeOrderRecord: Identifiable, Codable, Hashable {
+    let id: UUID
+    var exchangeID: UUID
+    var storedForRole: AppRole
+    var localStoreLink: CardAccessLink
+    var customerID: UUID
+    var groomerID: UUID
+    var taskCardLink: CardAccessLink
+    var groomerCardLink: CardAccessLink
+    var status: CardExchangeOrderStatus
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     let id: UUID
     var sequenceCode: String
@@ -223,6 +319,7 @@ struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     var styleGoal: String
     var specialNotes: String
     var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var localPackageLink: CardAccessLink
     var referenceImageSlot: GroomingTaskReferenceImageSlot
     var ownerHiddenScore: GroomingTaskOwnerHiddenScore
     var createdAt: Date
@@ -241,9 +338,9 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .sent: "Sent"
+        case .sent: "Waiting reply"
         case .accepted: "Accepted"
-        case .declined: "Declined"
+        case .declined: "Rejected"
         case .completed: "Completed"
         case .cancelled: "Cancelled"
         }
@@ -251,9 +348,9 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
 
     var customerActionTitle: String {
         switch self {
-        case .sent: "Task Card Sent"
+        case .sent: "Waiting for Reply"
         case .accepted: "Task Accepted"
-        case .declined: "Task Declined"
+        case .declined: "Rejected"
         case .completed: "Task Completed"
         case .cancelled: "Task Cancelled"
         }
@@ -262,11 +359,17 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
 
 struct GroomingTaskSubmission: Identifiable, Codable, Hashable {
     let id: UUID
+    var exchangeID: UUID
     var taskID: UUID
     var sequenceCode: String
     var userID: UUID
     var groomerID: UUID
     var taskSnapshot: GroomingTask
+    var taskCardLink: CardAccessLink
+    var groomerCardLink: CardAccessLink
+    var groomerInboxLink: CardAccessLink
+    var customerOrderID: UUID
+    var groomerOrderID: UUID
     var status: GroomingTaskSubmissionStatus
     var sentAt: Date
     var updatedAt: Date

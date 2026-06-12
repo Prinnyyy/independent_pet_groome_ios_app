@@ -613,6 +613,11 @@ struct ScheduledTaskDetailView: View {
                         }
                         detailRow("Reference", value: task.referenceImageSlot.displayTitle, icon: task.styleReferenceSource?.iconName ?? "photo")
                         detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
+                        detailRow("Inbox package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
+                        detailRow("Groomer card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
+                        if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
+                            detailRow("Order record", value: "\(order.status.label) · \(order.localStoreLink.storageScope.displayTitle)", icon: "doc.text.fill")
+                        }
                     }
                     .taskCard()
                     .padding(.horizontal, 18)
@@ -744,9 +749,12 @@ struct GroomerTaskSubmissionCard: View {
                 .foregroundStyle(PetTheme.muted)
                 .lineLimit(2)
 
-            HStack(spacing: 8) {
-                Label(task.referenceImageSlot.hasImage ? "Reference attached" : "No reference yet", systemImage: task.styleReferenceSource?.iconName ?? "photo")
-                Label("Owner score \(task.ownerHiddenScore.displayValue)", systemImage: "lock.shield")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Label(task.referenceImageSlot.hasImage ? "Reference attached" : "No reference yet", systemImage: task.styleReferenceSource?.iconName ?? "photo")
+                    Label("Owner score \(task.ownerHiddenScore.displayValue)", systemImage: "lock.shield")
+                }
+                Label("Inbox package saved", systemImage: "tray.and.arrow.down.fill")
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle([.declined, .completed, .cancelled].contains(submission.status) ? PetTheme.muted : PetTheme.sage)
@@ -817,6 +825,11 @@ struct GroomingTaskSubmissionDetailView: View {
                         detailRow("Reference", value: task.referenceImageSlot.displayTitle, icon: task.styleReferenceSource?.iconName ?? "photo")
                         detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
                         detailRow("Pet profile", value: "\(task.petPhotoSnapshots.count) photos captured with full profile snapshot", icon: "doc.text.magnifyingglass")
+                        detailRow("Task card package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
+                        detailRow("Groomer public card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
+                        if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
+                            detailRow("Order record", value: "\(order.status.label) · \(order.localStoreLink.storageScope.displayTitle)", icon: "doc.text.fill")
+                        }
                     }
                     .taskCard()
                     .padding(.horizontal, 18)

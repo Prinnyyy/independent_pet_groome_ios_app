@@ -101,7 +101,9 @@ create table public.groomers (
   ai_summary text,
   ai_skill_tags text[] default '{}',
   ai_review_summary text,
-  ai_last_processed_at timestamp with time zone
+  ai_last_processed_at timestamp with time zone,
+  public_card_url text,
+  card_version integer not null default 1
 );
 
 create table public.groomer_portfolio (
@@ -170,11 +172,28 @@ create table public.contact_events (
   created_at timestamp with time zone default now()
 );
 
+create table public.card_access_links (
+  id uuid primary key default gen_random_uuid(),
+  card_kind text not null check (card_kind in ('customer_task', 'groomer_profile', 'exchange_order')),
+  storage_scope text not null check (storage_scope in ('customer_local_package', 'public_server_card', 'groomer_inbox_package', 'customer_order_store', 'groomer_order_store')),
+  owner_role text not null check (owner_role in ('pet_owner', 'groomer')),
+  owner_entity_id uuid not null,
+  card_id uuid not null,
+  access_url text not null,
+  version integer not null default 1,
+  created_at timestamp with time zone default now()
+);
+
+comment on table public.card_access_links is
+  'Addressable card/package/order links. Customer task cards can live in local packages or groomer inbox packages; groomer profile cards are public server cards; exchange orders live in each client order store.';
+
 create table public.grooming_tasks (
   id uuid primary key default gen_random_uuid(),
   sequence_code text not null unique,
   user_id uuid references public.users(id) on delete cascade,
   pet_id uuid references public.pets(id) on delete set null,
+  local_package_url text,
+  card_version integer not null default 1,
   pet_snapshot jsonb not null,
   pet_photo_snapshots jsonb not null default '[]'::jsonb,
   service_type text not null,
@@ -208,6 +227,8 @@ comment on table public.grooming_tasks is
   'Generated task-card data container. Stores pet profile snapshot, appointment details, reference image slot, quick lookup code, and groomer-only owner hidden score.';
 comment on column public.grooming_tasks.sequence_code is
   'Internal random lookup code for groomer/admin retrieval. Do not expose in pet-owner UI or owner-facing API responses.';
+comment on column public.grooming_tasks.local_package_url is
+  'Customer-side local task-card package address. It is the source card package before the card is sent to a groomer.';
 comment on column public.grooming_tasks.pet_snapshot is
   'Frozen copy of the pet profile at task-card generation time, so later pet edits do not change the task request.';
 comment on column public.grooming_tasks.search_radius_miles is
@@ -217,13 +238,35 @@ comment on column public.grooming_tasks.reference_image_byte_size is
 comment on column public.grooming_tasks.owner_hidden_score is
   'Private groomer-visible client score derived from the previous groomer evaluation. Do not expose in pet-owner API responses or owner RLS policies.';
 
+create table public.card_exchange_orders (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid references public.users(id) on delete cascade,
+  groomer_id uuid references public.groomers(id) on delete cascade,
+  task_card_link_id uuid references public.card_access_links(id) on delete set null,
+  groomer_card_link_id uuid references public.card_access_links(id) on delete set null,
+  customer_order_local_uri text not null,
+  groomer_order_local_uri text not null,
+  status text not null default 'waiting_reply' check (status in ('waiting_reply', 'accepted', 'rejected', 'cancelled', 'completed')),
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+comment on table public.card_exchange_orders is
+  'Order records created from exchanging a customer task-card package with a groomer public profile card. Client apps store local order records that point back to these card links.';
+
 create table public.grooming_task_submissions (
   id uuid primary key default gen_random_uuid(),
+  exchange_order_id uuid references public.card_exchange_orders(id) on delete set null,
   grooming_task_id uuid references public.grooming_tasks(id) on delete cascade,
   sequence_code text not null,
   user_id uuid references public.users(id) on delete cascade,
   groomer_id uuid references public.groomers(id) on delete cascade,
   task_snapshot jsonb not null,
+  task_card_link jsonb not null default '{}'::jsonb,
+  groomer_card_link jsonb not null default '{}'::jsonb,
+  groomer_inbox_link jsonb not null default '{}'::jsonb,
+  customer_order_id uuid,
+  groomer_order_id uuid,
   status text not null default 'sent' check (status in ('sent', 'accepted', 'declined', 'completed', 'cancelled')),
   sent_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now(),
@@ -231,7 +274,7 @@ create table public.grooming_task_submissions (
 );
 
 comment on table public.grooming_task_submissions is
-  'A generated task card sent to a specific groomer inbox. Accepted submissions appear on the groomer schedule; declined, completed, and cancelled submissions should render as inactive where appropriate.';
+  'Groomer inbox receive container for a customer task-card package. It stores card access links and points to the exchange order created for both clients.';
 
 create table public.grooming_task_messages (
   id uuid primary key default gen_random_uuid(),
@@ -304,10 +347,16 @@ create index reviews_groomer_id_idx on public.reviews(groomer_id);
 create index favorites_user_id_idx on public.favorites(user_id);
 create index contact_events_groomer_id_idx on public.contact_events(groomer_id);
 create index contact_events_created_at_idx on public.contact_events(created_at);
+create index card_access_links_card_id_idx on public.card_access_links(card_id);
+create index card_access_links_storage_scope_idx on public.card_access_links(storage_scope);
+create index card_access_links_owner_entity_id_idx on public.card_access_links(owner_entity_id);
 create index grooming_tasks_sequence_code_idx on public.grooming_tasks(sequence_code);
 create index grooming_tasks_user_id_idx on public.grooming_tasks(user_id);
 create index grooming_tasks_pet_id_idx on public.grooming_tasks(pet_id);
 create index grooming_tasks_status_idx on public.grooming_tasks(status);
+create index card_exchange_orders_customer_id_idx on public.card_exchange_orders(customer_id);
+create index card_exchange_orders_groomer_id_idx on public.card_exchange_orders(groomer_id);
+create index card_exchange_orders_status_idx on public.card_exchange_orders(status);
 create index grooming_task_submissions_groomer_id_idx on public.grooming_task_submissions(groomer_id);
 create index grooming_task_submissions_user_id_idx on public.grooming_task_submissions(user_id);
 create index grooming_task_submissions_status_idx on public.grooming_task_submissions(status);
@@ -329,6 +378,9 @@ create trigger set_reviews_updated_at before update on public.reviews
 for each row execute function public.set_updated_at();
 
 create trigger set_grooming_tasks_updated_at before update on public.grooming_tasks
+for each row execute function public.set_updated_at();
+
+create trigger set_card_exchange_orders_updated_at before update on public.card_exchange_orders
 for each row execute function public.set_updated_at();
 
 create trigger set_grooming_task_submissions_updated_at before update on public.grooming_task_submissions

@@ -31,15 +31,25 @@ xcodebuild \
 The app includes one shared mobile experience for both customer users and groomers:
 
 - Pet owner mode: Home, Search, Pets, Saved, and Account tabs.
-- Groomer mode: Today, Profile, Inbox, Portfolio, and Account tabs.
+- Groomer mode: Today, Schedule, Inbox, Portfolio, and Account tabs.
 - Account role switcher so the same signed-in demo user can move between pet owner and groomer workspaces.
 - Mock sign-in/profile state with the demo user claiming the Ava Park groomer profile.
 - Pet profile create/edit/delete and photo picker flow with an 8-photo limit.
 - Groomer directory, filters, groomer profile pages, portfolio detail pages.
-- Favorites, contact event logging, quote requests, reviews, reports, groomer inquiry management, groomer profile editing, and groomer portfolio creation.
+- Favorites, contact event logging, task-card sending, mock chat with image placeholders, quote requests, reviews, reports, groomer inbox/schedule management, groomer profile editing, and groomer portfolio creation.
 - Disabled AI feature flags and an `AIService` protocol with placeholder behavior.
 
 The live Supabase integration should replace the `Mock*Repository` implementations with the `Supabase*Repository` placeholders after project URL, anon key, auth, storage, and RLS policies are finalized.
+
+## Card Exchange Model
+
+The core product model is card-package exchange:
+
+- A customer creates a grooming task card as a local package. It contains the pet snapshot, pet photo snapshot references, appointment date, time window, style goal, notes, search area, 5 MB style-reference image slot, private owner score, and an internal lookup code that is not shown to the customer.
+- Groomers publish public profile cards that stay server-addressable. Customer orders store a groomer card link instead of copying the groomer profile locally.
+- Sending a task card creates a groomer inbox package plus two local order records: one in the customer order store and one in the groomer order store.
+- Each order record points to the task-card package and the groomer public-card link, and tracks `waiting_reply`, `accepted`, `rejected`, `cancelled`, or `completed`.
+- The Supabase schema mirrors this with `card_access_links`, `grooming_tasks`, `grooming_task_submissions`, and `card_exchange_orders` so the mock demo can later move to live storage without changing the product shape.
 
 ## Platform Admin Dashboard
 
@@ -81,6 +91,6 @@ RLS policies are not enabled in this skeleton because real auth roles, admin cla
 
 ## MVP Boundaries
 
-Included: discovery, profiles, portfolios, reviews, favorites, contact events, quote requests, reports, basic admin moderation, and AI-ready structure.
+Included: discovery, profiles, portfolios, reviews, favorites, contact events, task-card exchange, mock chat, quote requests, reports, basic admin moderation, and AI-ready structure.
 
-Not included: platform payment, booking calendar, dispute handling, real-time chat, memberships, ads, groomer self-service, AI image generation, or production Supabase credentials.
+Not included: platform payment, production calendar sync, dispute handling, production real-time chat, memberships, ads, AI image generation, or production Supabase credentials.

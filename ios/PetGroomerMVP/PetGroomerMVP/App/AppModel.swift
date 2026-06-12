@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     @Published var savedGroomingTaskTemplates: [GroomingTaskTemplate]
     @Published var groomingTasks: [GroomingTask]
     @Published var groomingTaskSubmissions: [GroomingTaskSubmission]
+    @Published var customerOrderRecords: [CardExchangeOrderRecord]
+    @Published var groomerOrderRecords: [CardExchangeOrderRecord]
     @Published var taskChatMessages: [TaskChatMessage]
     @Published var currentGroomingTask: GroomingTask?
 
@@ -64,6 +66,8 @@ final class AppModel: ObservableObject {
         self.savedGroomingTaskTemplates = []
         self.groomingTasks = []
         self.groomingTaskSubmissions = []
+        self.customerOrderRecords = []
+        self.groomerOrderRecords = []
         self.taskChatMessages = []
         self.currentGroomingTask = nil
     }
@@ -134,8 +138,21 @@ final class AppModel: ObservableObject {
         styleReferenceSource: GroomingTaskStyleReferenceSource?
     ) {
         let sequenceCode = Self.makeTaskSequenceCode()
-        let task = GroomingTask(
+        let taskID = UUID()
+        let now = Date()
+        let localPackageLink = CardAccessLink(
             id: UUID(),
+            cardKind: .customerTask,
+            storageScope: .customerLocalPackage,
+            ownerRole: .petOwner,
+            ownerEntityID: currentUser.id,
+            cardID: taskID,
+            url: "local://customer/task-cards/\(taskID.uuidString)",
+            version: 1,
+            createdAt: now
+        )
+        let task = GroomingTask(
+            id: taskID,
             sequenceCode: sequenceCode,
             userID: currentUser.id,
             petID: pet.id,
@@ -148,9 +165,10 @@ final class AppModel: ObservableObject {
             styleGoal: styleGoal,
             specialNotes: specialNotes,
             styleReferenceSource: styleReferenceSource,
+            localPackageLink: localPackageLink,
             referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(source: styleReferenceSource, sequenceCode: sequenceCode),
             ownerHiddenScore: ownerHiddenScore(for: currentUser.id),
-            createdAt: Date()
+            createdAt: now
         )
         currentGroomingTask = task
         groomingTasks.insert(task, at: 0)
@@ -197,6 +215,19 @@ final class AppModel: ObservableObject {
         groomingTaskSubmissions.first { $0.taskID == task.id && $0.groomerID == groomer.id }
     }
 
+    func orderRecords(for role: AppRole) -> [CardExchangeOrderRecord] {
+        switch role {
+        case .petOwner:
+            customerOrderRecords.sorted { $0.updatedAt > $1.updatedAt }
+        case .groomer:
+            groomerOrderRecords.sorted { $0.updatedAt > $1.updatedAt }
+        }
+    }
+
+    func orderRecord(exchangeID: UUID, for role: AppRole) -> CardExchangeOrderRecord? {
+        orderRecords(for: role).first { $0.exchangeID == exchangeID }
+    }
+
     @discardableResult
     func sendCurrentTask(to groomer: Groomer) -> GroomingTaskSubmission? {
         guard let task = currentGroomingTask else { return nil }
@@ -204,18 +235,65 @@ final class AppModel: ObservableObject {
             return existing
         }
 
-        let submission = GroomingTaskSubmission(
+        let exchangeID = UUID()
+        let submissionID = UUID()
+        let customerOrderID = UUID()
+        let groomerOrderID = UUID()
+        let now = Date()
+        let groomerCardLink = publicGroomerCardLink(for: groomer)
+        let groomerInboxLink = CardAccessLink(
             id: UUID(),
+            cardKind: .customerTask,
+            storageScope: .groomerInboxPackage,
+            ownerRole: .groomer,
+            ownerEntityID: groomer.id,
+            cardID: task.id,
+            url: "local://groomer/\(groomer.id.uuidString)/inbox/task-cards/\(task.id.uuidString)",
+            version: task.localPackageLink.version,
+            createdAt: now
+        )
+        let customerOrderRecord = makeOrderRecord(
+            id: customerOrderID,
+            exchangeID: exchangeID,
+            storedForRole: .petOwner,
+            localStoreScope: .customerOrderStore,
+            customerID: task.userID,
+            groomerID: groomer.id,
+            taskCardLink: task.localPackageLink,
+            groomerCardLink: groomerCardLink,
+            now: now
+        )
+        let groomerOrderRecord = makeOrderRecord(
+            id: groomerOrderID,
+            exchangeID: exchangeID,
+            storedForRole: .groomer,
+            localStoreScope: .groomerOrderStore,
+            customerID: task.userID,
+            groomerID: groomer.id,
+            taskCardLink: groomerInboxLink,
+            groomerCardLink: groomerCardLink,
+            now: now
+        )
+        let submission = GroomingTaskSubmission(
+            id: submissionID,
+            exchangeID: exchangeID,
             taskID: task.id,
             sequenceCode: task.sequenceCode,
             userID: task.userID,
             groomerID: groomer.id,
             taskSnapshot: task,
+            taskCardLink: task.localPackageLink,
+            groomerCardLink: groomerCardLink,
+            groomerInboxLink: groomerInboxLink,
+            customerOrderID: customerOrderID,
+            groomerOrderID: groomerOrderID,
             status: .sent,
-            sentAt: Date(),
-            updatedAt: Date()
+            sentAt: now,
+            updatedAt: now
         )
         groomingTaskSubmissions.insert(submission, at: 0)
+        customerOrderRecords.insert(customerOrderRecord, at: 0)
+        groomerOrderRecords.insert(groomerOrderRecord, at: 0)
         logContact(groomer: groomer, pet: task.petSnapshot, method: .quoteRequest)
         return submission
     }
@@ -224,6 +302,7 @@ final class AppModel: ObservableObject {
         guard let index = groomingTaskSubmissions.firstIndex(where: { $0.id == id }) else { return }
         groomingTaskSubmissions[index].status = status
         groomingTaskSubmissions[index].updatedAt = Date()
+        updateOrderRecords(exchangeID: groomingTaskSubmissions[index].exchangeID, status: CardExchangeOrderStatus(submissionStatus: status))
     }
 
     func cancelTaskSubmission(id: UUID) {
@@ -593,6 +672,68 @@ final class AppModel: ObservableObject {
                 updatedAt: Date()
             )
         )
+    }
+
+    func publicGroomerCardLink(for groomer: Groomer) -> CardAccessLink {
+        CardAccessLink(
+            id: groomer.id,
+            cardKind: .groomerProfile,
+            storageScope: .publicServerCard,
+            ownerRole: .groomer,
+            ownerEntityID: groomer.id,
+            cardID: groomer.id,
+            url: "https://pet-groomer.local/groomers/\(groomer.id.uuidString.lowercased())",
+            version: 1,
+            createdAt: groomer.updatedAt
+        )
+    }
+
+    private func makeOrderRecord(
+        id: UUID,
+        exchangeID: UUID,
+        storedForRole: AppRole,
+        localStoreScope: CardStorageScope,
+        customerID: UUID,
+        groomerID: UUID,
+        taskCardLink: CardAccessLink,
+        groomerCardLink: CardAccessLink,
+        now: Date
+    ) -> CardExchangeOrderRecord {
+        CardExchangeOrderRecord(
+            id: id,
+            exchangeID: exchangeID,
+            storedForRole: storedForRole,
+            localStoreLink: CardAccessLink(
+                id: UUID(),
+                cardKind: .exchangeOrder,
+                storageScope: localStoreScope,
+                ownerRole: storedForRole,
+                ownerEntityID: storedForRole == .petOwner ? customerID : groomerID,
+                cardID: id,
+                url: "local://\(localStoreScope.rawValue)/orders/\(id.uuidString)",
+                version: 1,
+                createdAt: now
+            ),
+            customerID: customerID,
+            groomerID: groomerID,
+            taskCardLink: taskCardLink,
+            groomerCardLink: groomerCardLink,
+            status: .waitingReply,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    private func updateOrderRecords(exchangeID: UUID, status: CardExchangeOrderStatus) {
+        let now = Date()
+        if let customerIndex = customerOrderRecords.firstIndex(where: { $0.exchangeID == exchangeID }) {
+            customerOrderRecords[customerIndex].status = status
+            customerOrderRecords[customerIndex].updatedAt = now
+        }
+        if let groomerIndex = groomerOrderRecords.firstIndex(where: { $0.exchangeID == exchangeID }) {
+            groomerOrderRecords[groomerIndex].status = status
+            groomerOrderRecords[groomerIndex].updatedAt = now
+        }
     }
 
     private func counterpartName(for submission: GroomingTaskSubmission, viewerRole: AppRole) -> String {
