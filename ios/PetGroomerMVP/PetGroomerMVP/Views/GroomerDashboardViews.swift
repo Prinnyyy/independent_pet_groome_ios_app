@@ -604,6 +604,8 @@ struct ScheduledTaskDetailView: View {
                         }
 
                         detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
+                        detailRow("Start near", value: task.searchArea.locationTitle, icon: "location.fill")
+                        detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
                         detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
                         detailRow("Style goal", value: task.styleGoal, icon: "scissors")
                         if !task.specialNotes.isEmpty {
@@ -806,6 +808,8 @@ struct GroomingTaskSubmissionDetailView: View {
 
                         detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
                         detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
+                        detailRow("Start near", value: task.searchArea.locationTitle, icon: "location.fill")
+                        detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
                         detailRow("Style goal", value: task.styleGoal, icon: "scissors")
                         if !task.specialNotes.isEmpty {
                             detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
@@ -1360,6 +1364,7 @@ struct GroomerTaskDataCard: View {
             }
 
             Label("\(task.service.rawValue) · \(dateText) · \(task.timeWindow.displayTitle)", systemImage: "calendar")
+            Label("\(task.searchArea.locationTitle) · \(task.searchArea.rangeTitle)", systemImage: "location.fill")
             Label(petDetails, systemImage: "pawprint.fill")
             Label(task.styleGoal, systemImage: "scissors")
             Label(task.referenceImageSlot.displayTitle, systemImage: task.styleReferenceSource?.iconName ?? "photo.badge.plus")

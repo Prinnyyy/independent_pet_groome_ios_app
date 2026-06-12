@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct RootView: View {
@@ -63,9 +64,12 @@ struct HomeView: View {
     @State private var selectedService: GroomingTaskService = .bath
     @State private var selectedDate = Date()
     @State private var selectedTimeWindow: GroomingTaskTimeWindow = .eightAM
+    @State private var selectedSearchRadiusMiles = 10
     @State private var styleGoal = ""
     @State private var specialNotes = ""
     @State private var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    @State private var selectedStyleReferencePhoto: PhotosPickerItem?
+    @State private var showStyleReferencePhotoPicker = false
     @State private var isEditingTask = true
     @State private var templateSaved = false
     @State private var showStyleReferenceOptions = false
@@ -90,6 +94,22 @@ struct HomeView: View {
 
     private var homeTransitionAnimation: Animation {
         .smooth(duration: 0.46)
+    }
+
+    private var searchRadiusOptions: [Int] {
+        [3, 5, 10, 15, 25, 50]
+    }
+
+    private var currentSearchArea: GroomingTaskSearchArea {
+        GroomingTaskSearchArea(
+            label: "Current area",
+            city: model.currentUser.city,
+            zipCode: model.currentUser.zipCode,
+            radiusMiles: selectedSearchRadiusMiles,
+            usesCurrentLocation: true,
+            latitude: nil,
+            longitude: nil
+        )
     }
 
     var body: some View {
@@ -236,15 +256,23 @@ struct HomeView: View {
                 styleReferenceSource = .camera
             }
             Button("Upload from Photos") {
-                styleReferenceSource = .photoLibrary
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    showStyleReferencePhotoPicker = true
+                }
             }
             if styleReferenceSource != nil {
                 Button("Remove Reference", role: .destructive) {
                     styleReferenceSource = nil
+                    selectedStyleReferencePhoto = nil
                 }
             }
         } message: {
             Text("Attach a style you like so the groomer can understand the look.")
+        }
+        .photosPicker(isPresented: $showStyleReferencePhotoPicker, selection: $selectedStyleReferencePhoto, matching: .images)
+        .onChange(of: selectedStyleReferencePhoto) { _, item in
+            guard item != nil else { return }
+            styleReferenceSource = .photoLibrary
         }
         .confirmationDialog("Saved task templates", isPresented: $showTemplatePicker, titleVisibility: .visible) {
             ForEach(model.savedGroomingTaskTemplates) { template in
@@ -300,6 +328,25 @@ struct HomeView: View {
                     Picker("Time", selection: $selectedTimeWindow) {
                         ForEach(GroomingTaskTimeWindow.allCases) { window in
                             Text(window.displayTitle).tag(window)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            HStack(spacing: 10) {
+                taskField(title: "Start near") {
+                    Label(currentSearchArea.locationTitle, systemImage: "location.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.coral)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                }
+
+                taskField(title: "Search range") {
+                    Picker("Search range", selection: $selectedSearchRadiusMiles) {
+                        ForEach(searchRadiusOptions, id: \.self) { radius in
+                            Text("Within \(radius) mi").tag(radius)
                         }
                     }
                     .pickerStyle(.menu)
@@ -382,6 +429,7 @@ struct HomeView: View {
                 service: selectedService,
                 targetDate: safeDate,
                 timeWindow: selectedTimeWindow,
+                searchArea: currentSearchArea,
                 styleGoal: cleanedStyleGoal.isEmpty ? defaultStyleGoal(for: selectedService) : cleanedStyleGoal,
                 specialNotes: cleaned(specialNotes),
                 styleReferenceSource: styleReferenceSource
@@ -398,6 +446,7 @@ struct HomeView: View {
         selectedService = task.service
         selectedDate = task.targetDate < todayStart ? todayStart : task.targetDate
         selectedTimeWindow = task.timeWindow
+        selectedSearchRadiusMiles = task.searchArea.radiusMiles
         styleGoal = task.styleGoal
         specialNotes = task.specialNotes
         styleReferenceSource = task.styleReferenceSource
@@ -408,9 +457,11 @@ struct HomeView: View {
         selectedService = .bath
         selectedDate = todayStart
         selectedTimeWindow = .eightAM
+        selectedSearchRadiusMiles = 10
         styleGoal = ""
         specialNotes = ""
         styleReferenceSource = nil
+        selectedStyleReferencePhoto = nil
     }
 
     private func applyTemplate(_ template: GroomingTaskTemplate) {
@@ -420,6 +471,7 @@ struct HomeView: View {
         selectedService = template.service
         selectedDate = todayStart
         selectedTimeWindow = template.timeWindow
+        selectedSearchRadiusMiles = template.searchArea.radiusMiles
         styleGoal = template.styleGoal
         specialNotes = template.specialNotes
         styleReferenceSource = template.styleReferenceSource
@@ -544,6 +596,11 @@ struct GroomingTaskCard: View {
             HStack(alignment: .top, spacing: 16) {
                 GroomingTaskFact(iconName: "calendar", title: "Date", value: dateText)
                 GroomingTaskFact(iconName: "clock", title: "Time", value: task.timeWindow.displayTitle)
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                GroomingTaskFact(iconName: "location.fill", title: "Start near", value: task.searchArea.locationTitle)
+                GroomingTaskFact(iconName: "scope", title: "Search range", value: task.searchArea.rangeTitle)
             }
 
             VStack(alignment: .leading, spacing: 7) {

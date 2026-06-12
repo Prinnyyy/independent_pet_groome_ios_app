@@ -128,6 +128,7 @@ final class AppModel: ObservableObject {
         service: GroomingTaskService,
         targetDate: Date,
         timeWindow: GroomingTaskTimeWindow,
+        searchArea: GroomingTaskSearchArea,
         styleGoal: String,
         specialNotes: String,
         styleReferenceSource: GroomingTaskStyleReferenceSource?
@@ -143,6 +144,7 @@ final class AppModel: ObservableObject {
             service: service,
             targetDate: targetDate,
             timeWindow: timeWindow,
+            searchArea: searchArea,
             styleGoal: styleGoal,
             specialNotes: specialNotes,
             styleReferenceSource: styleReferenceSource,
@@ -307,6 +309,7 @@ final class AppModel: ObservableObject {
             petID: task.petID,
             service: task.service,
             timeWindow: task.timeWindow,
+            searchArea: task.searchArea,
             styleGoal: task.styleGoal,
             specialNotes: task.specialNotes,
             styleReferenceSource: task.styleReferenceSource,
@@ -317,6 +320,7 @@ final class AppModel: ObservableObject {
             existing.petID == template.petID &&
                 existing.service == template.service &&
                 existing.timeWindow == template.timeWindow &&
+                existing.searchArea == template.searchArea &&
                 existing.styleGoal == template.styleGoal &&
                 existing.specialNotes == template.specialNotes &&
                 existing.styleReferenceSource == template.styleReferenceSource
@@ -333,7 +337,7 @@ final class AppModel: ObservableObject {
                 guard groomer.status == .published else { return false }
                 let speciesMatch = pet.species == .cat ? groomer.acceptsCats : groomer.acceptsDogs
                 let sizeMatch = pet.species == .cat || acceptedSize(for: pet).map { groomer.sizeAccepted.contains($0) } ?? true
-                return speciesMatch && sizeMatch
+                return speciesMatch && sizeMatch && locationMatches(groomer: groomer, searchArea: task.searchArea)
             }
             .sorted { lhs, rhs in
                 recommendationScore(groomer: lhs, pet: pet, task: task) > recommendationScore(groomer: rhs, pet: pet, task: task)
@@ -370,8 +374,10 @@ final class AppModel: ObservableObject {
     private func recommendationScore(groomer: Groomer, pet: Pet, task: GroomingTask) -> Double {
         var score = groomer.rating
 
-        if groomer.city == currentUser.city || groomer.serviceAreas.contains(currentUser.city) {
+        if groomer.city == task.searchArea.city || groomer.serviceAreas.contains(task.searchArea.city) {
             score += 3
+        } else if task.searchArea.radiusMiles >= 25 {
+            score += 0.8
         }
         if groomer.isVerified {
             score += 1.4
@@ -393,6 +399,14 @@ final class AppModel: ObservableObject {
         }
 
         return score
+    }
+
+    private func locationMatches(groomer: Groomer, searchArea: GroomingTaskSearchArea) -> Bool {
+        if groomer.city == searchArea.city || groomer.serviceAreas.contains(searchArea.city) {
+            return true
+        }
+
+        return searchArea.radiusMiles >= 25
     }
 
     private func serviceMatches(groomer: Groomer, service: GroomingTaskService) -> Bool {

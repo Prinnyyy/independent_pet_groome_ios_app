@@ -180,6 +180,13 @@ create table public.grooming_tasks (
   service_type text not null,
   appointment_date date not null,
   time_window text not null,
+  search_area_label text default 'Current area',
+  search_area_city text,
+  search_area_zip_code text,
+  search_radius_miles integer not null default 10 check (search_radius_miles > 0 and search_radius_miles <= 100),
+  search_uses_current_location boolean not null default true,
+  search_latitude double precision,
+  search_longitude double precision,
   style_goal text not null,
   special_notes text,
   reference_image_source text check (reference_image_source in ('camera', 'photo_library') or reference_image_source is null),
@@ -203,6 +210,8 @@ comment on column public.grooming_tasks.sequence_code is
   'Internal random lookup code for groomer/admin retrieval. Do not expose in pet-owner UI or owner-facing API responses.';
 comment on column public.grooming_tasks.pet_snapshot is
   'Frozen copy of the pet profile at task-card generation time, so later pet edits do not change the task request.';
+comment on column public.grooming_tasks.search_radius_miles is
+  'Customer-selected groomer discovery radius in miles. MVP uses city/service-area matching until real location services are connected.';
 comment on column public.grooming_tasks.reference_image_byte_size is
   'Reference image upload must be 5 MB or smaller.';
 comment on column public.grooming_tasks.owner_hidden_score is

@@ -191,6 +191,24 @@ struct GroomingTaskOwnerHiddenScore: Codable, Hashable {
     }
 }
 
+struct GroomingTaskSearchArea: Codable, Hashable {
+    var label: String
+    var city: String
+    var zipCode: String
+    var radiusMiles: Int
+    var usesCurrentLocation: Bool
+    var latitude: Double?
+    var longitude: Double?
+
+    var locationTitle: String {
+        [city, zipCode].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    var rangeTitle: String {
+        "Within \(radiusMiles) mi"
+    }
+}
+
 struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     let id: UUID
     var sequenceCode: String
@@ -201,6 +219,7 @@ struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     var service: GroomingTaskService
     var targetDate: Date
     var timeWindow: GroomingTaskTimeWindow
+    var searchArea: GroomingTaskSearchArea
     var styleGoal: String
     var specialNotes: String
     var styleReferenceSource: GroomingTaskStyleReferenceSource?
@@ -279,6 +298,7 @@ struct GroomingTaskTemplate: Identifiable, Codable, Hashable {
     var petID: UUID
     var service: GroomingTaskService
     var timeWindow: GroomingTaskTimeWindow
+    var searchArea: GroomingTaskSearchArea
     var styleGoal: String
     var specialNotes: String
     var styleReferenceSource: GroomingTaskStyleReferenceSource?
