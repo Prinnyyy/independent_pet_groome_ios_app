@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published var groomingTaskSubmissions: [GroomingTaskSubmission]
     @Published var customerOrderRecords: [CardExchangeOrderRecord]
     @Published var groomerOrderRecords: [CardExchangeOrderRecord]
+    @Published var petProfilePackages: [PetProfilePackage]
     @Published var taskChatMessages: [TaskChatMessage]
     @Published var currentGroomingTask: GroomingTask?
 
@@ -86,8 +87,10 @@ final class AppModel: ObservableObject {
         self.groomingTaskSubmissions = []
         self.customerOrderRecords = []
         self.groomerOrderRecords = []
+        self.petProfilePackages = []
         self.taskChatMessages = []
         self.currentGroomingTask = nil
+        refreshAllPetProfilePackages()
     }
 
     var savedGroomers: [Groomer] {
@@ -110,6 +113,18 @@ final class AppModel: ObservableObject {
 
     func photos(for pet: Pet) -> [PetPhoto] {
         petPhotos.filter { $0.petID == pet.id }
+    }
+
+    func petProfilePackage(for petID: UUID) -> PetProfilePackage? {
+        if let package = petProfilePackages.first(where: { $0.petID == petID }) {
+            return package
+        }
+        guard let pet = pets.first(where: { $0.id == petID }) else { return nil }
+        return makePetProfilePackage(for: pet, now: Date())
+    }
+
+    func petProfilePackage(for link: CardAccessLink) -> PetProfilePackage? {
+        petProfilePackage(for: link.cardID)
     }
 
     func portfolio(for groomer: Groomer) -> [PortfolioItem] {
@@ -165,11 +180,13 @@ final class AppModel: ObservableObject {
         searchArea: GroomingTaskSearchArea,
         styleGoal: String,
         specialNotes: String,
-        styleReferenceSource: GroomingTaskStyleReferenceSource?
+        styleReferenceSource: GroomingTaskStyleReferenceSource?,
+        styleReferenceImageData: Data?
     ) {
         let sequenceCode = Self.makeTaskSequenceCode()
         let taskID = UUID()
         let now = Date()
+        let petProfilePackage = refreshPetProfilePackage(for: pet)
         let localPackageLink = CardAccessLink(
             id: UUID(),
             cardKind: .customerTask,
@@ -188,6 +205,7 @@ final class AppModel: ObservableObject {
             petID: pet.id,
             petSnapshot: pet,
             petPhotoSnapshots: photos(for: pet),
+            petProfileLink: petProfilePackage.serverProfileLink,
             service: service,
             targetDate: targetDate,
             timeWindow: timeWindow,
@@ -196,7 +214,7 @@ final class AppModel: ObservableObject {
             specialNotes: specialNotes,
             styleReferenceSource: styleReferenceSource,
             localPackageLink: localPackageLink,
-            referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(source: styleReferenceSource, sequenceCode: sequenceCode),
+            referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(source: styleReferenceSource, sequenceCode: sequenceCode, imageData: styleReferenceImageData),
             ownerHiddenScore: ownerHiddenScore(for: currentUser.id),
             createdAt: now
         )
@@ -245,6 +263,14 @@ final class AppModel: ObservableObject {
         groomingTaskSubmissions.first { $0.taskID == task.id && $0.groomerID == groomer.id }
     }
 
+    func pendingTaskSubmission(for task: GroomingTask, groomer: Groomer) -> GroomingTaskSubmission? {
+        groomingTaskSubmissions.first { $0.taskID == task.id && $0.groomerID == groomer.id && $0.status == .sent }
+    }
+
+    func acceptedTaskSubmission(for task: GroomingTask) -> GroomingTaskSubmission? {
+        groomingTaskSubmissions.first { $0.taskID == task.id && $0.status == .accepted }
+    }
+
     func orderRecords(for role: AppRole) -> [CardExchangeOrderRecord] {
         switch role {
         case .petOwner:
@@ -269,7 +295,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func sendCurrentTask(to groomer: Groomer) -> GroomingTaskSubmission? {
         guard let task = currentGroomingTask else { return nil }
-        if let existing = taskSubmission(for: task, groomer: groomer) {
+        if let existing = pendingTaskSubmission(for: task, groomer: groomer) {
             return existing
         }
 
@@ -341,9 +367,17 @@ final class AppModel: ObservableObject {
         groomingTaskSubmissions[index].status = status
         groomingTaskSubmissions[index].updatedAt = Date()
         updateOrderRecords(exchangeID: groomingTaskSubmissions[index].exchangeID, status: CardExchangeOrderStatus(submissionStatus: status))
+        if status == .accepted {
+            cancelCompetingSubmissions(for: groomingTaskSubmissions[index])
+        }
     }
 
     func cancelTaskSubmission(id: UUID) {
+        updateTaskSubmissionStatus(id: id, status: .cancelled)
+    }
+
+    func revokeTaskSubmission(id: UUID) {
+        guard let submission = groomingTaskSubmissions.first(where: { $0.id == id }), submission.status == .sent else { return }
         updateTaskSubmissionStatus(id: id, status: .cancelled)
     }
 
@@ -541,7 +575,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addPet(name: String, species: PetSpecies, breed: String, weight: Double?, coatType: String, temperament: [String]) {
+    func addPet(
+        name: String,
+        species: PetSpecies,
+        breed: String,
+        weight: Double?,
+        age: Double?,
+        sex: String?,
+        temperament: [String],
+        healthNotes: String?
+    ) {
         let pet = Pet(
             id: UUID(),
             userID: currentUser.id,
@@ -550,13 +593,13 @@ final class AppModel: ObservableObject {
             breed: breed,
             breedNotes: nil,
             weight: weight,
-            age: nil,
-            sex: nil,
-            coatType: coatType,
+            age: age,
+            sex: sex,
+            coatType: "",
             coatCondition: "Normal",
             temperament: temperament,
-            healthNotes: nil,
-            groomingHistory: "Regular grooming",
+            healthNotes: healthNotes,
+            groomingHistory: nil,
             createdAt: Date(),
             updatedAt: Date(),
             aiDetectedBreed: nil,
@@ -568,6 +611,7 @@ final class AppModel: ObservableObject {
             aiLastAnalyzedAt: nil
         )
         pets.insert(pet, at: 0)
+        refreshPetProfilePackage(for: pet)
     }
 
     func updatePet(_ pet: Pet) {
@@ -575,16 +619,17 @@ final class AppModel: ObservableObject {
         var updated = pet
         updated.updatedAt = Date()
         pets[index] = updated
+        refreshPetProfilePackage(for: updated)
     }
 
     func deletePet(_ pet: Pet) {
         pets.removeAll { $0.id == pet.id }
         petPhotos.removeAll { $0.petID == pet.id }
+        petProfilePackages.removeAll { $0.petID == pet.id }
     }
 
     @discardableResult
     func addMockPhoto(to pet: Pet, type: PetPhotoType) -> Bool {
-        guard photos(for: pet).count < 8 else { return false }
         let photo = PetPhoto(
             id: UUID(),
             petID: pet.id,
@@ -595,6 +640,33 @@ final class AppModel: ObservableObject {
             createdAt: Date()
         )
         petPhotos.insert(photo, at: 0)
+        refreshPetProfilePackage(for: pet)
+        return true
+    }
+
+    @discardableResult
+    func savePetPhoto(to pet: Pet, type: PetPhotoType, imageData: Data?) -> Bool {
+        let replacesExistingSlot = type != .other
+        if replacesExistingSlot, let index = petPhotos.firstIndex(where: { $0.petID == pet.id && $0.photoType == type }) {
+            petPhotos[index].imageURL = "local://pet-photo-\(UUID().uuidString)"
+            petPhotos[index].imageData = imageData
+            petPhotos[index].createdAt = Date()
+            refreshPetProfilePackage(for: pet)
+            return true
+        }
+
+        let photo = PetPhoto(
+            id: UUID(),
+            petID: pet.id,
+            userID: currentUser.id,
+            imageURL: "local://pet-photo-\(UUID().uuidString)",
+            photoType: type,
+            isPrimary: photos(for: pet).isEmpty,
+            createdAt: Date(),
+            imageData: imageData
+        )
+        petPhotos.insert(photo, at: 0)
+        refreshPetProfilePackage(for: pet)
         return true
     }
 
@@ -726,6 +798,65 @@ final class AppModel: ObservableObject {
         )
     }
 
+    @discardableResult
+    private func refreshPetProfilePackage(for pet: Pet) -> PetProfilePackage {
+        let now = Date()
+        let package = makePetProfilePackage(for: pet, now: now)
+        if let packageIndex = petProfilePackages.firstIndex(where: { $0.petID == pet.id }) {
+            petProfilePackages[packageIndex] = package
+        } else {
+            petProfilePackages.insert(package, at: 0)
+        }
+        if let petIndex = pets.firstIndex(where: { $0.id == pet.id }) {
+            pets[petIndex].localProfileLink = package.localProfileLink
+            pets[petIndex].serverProfileLink = package.serverProfileLink
+        }
+        return package
+    }
+
+    private func refreshAllPetProfilePackages() {
+        let currentPets = pets
+        currentPets.forEach { refreshPetProfilePackage(for: $0) }
+    }
+
+    private func makePetProfilePackage(for pet: Pet, now: Date) -> PetProfilePackage {
+        let localLink = CardAccessLink(
+            id: UUID(),
+            cardKind: .petProfile,
+            storageScope: .customerPetProfileStore,
+            ownerRole: .petOwner,
+            ownerEntityID: pet.userID,
+            cardID: pet.id,
+            url: "local://customer/pet-profiles/\(pet.id.uuidString)",
+            version: 1,
+            createdAt: now
+        )
+        let serverLink = CardAccessLink(
+            id: pet.id,
+            cardKind: .petProfile,
+            storageScope: .serverPetProfileStore,
+            ownerRole: .petOwner,
+            ownerEntityID: pet.userID,
+            cardID: pet.id,
+            url: "https://pet-groomer.local/pet-profiles/\(pet.id.uuidString.lowercased())",
+            version: 1,
+            createdAt: now
+        )
+        var snapshot = pet
+        snapshot.localProfileLink = localLink
+        snapshot.serverProfileLink = serverLink
+        return PetProfilePackage(
+            id: pet.id,
+            petID: pet.id,
+            userID: pet.userID,
+            petSnapshot: snapshot,
+            photoSnapshots: photos(for: pet),
+            localProfileLink: localLink,
+            serverProfileLink: serverLink,
+            updatedAt: now
+        )
+    }
+
     private func makeOrderRecord(
         id: UUID,
         exchangeID: UUID,
@@ -771,6 +902,22 @@ final class AppModel: ObservableObject {
         if let groomerIndex = groomerOrderRecords.firstIndex(where: { $0.exchangeID == exchangeID }) {
             groomerOrderRecords[groomerIndex].status = status
             groomerOrderRecords[groomerIndex].updatedAt = now
+        }
+    }
+
+    private func cancelCompetingSubmissions(for acceptedSubmission: GroomingTaskSubmission) {
+        let now = Date()
+        let competingIndexes = groomingTaskSubmissions.indices.filter { index in
+            let submission = groomingTaskSubmissions[index]
+            return submission.taskID == acceptedSubmission.taskID &&
+                submission.id != acceptedSubmission.id &&
+                submission.status == .sent
+        }
+
+        for index in competingIndexes {
+            groomingTaskSubmissions[index].status = .cancelled
+            groomingTaskSubmissions[index].updatedAt = now
+            updateOrderRecords(exchangeID: groomingTaskSubmissions[index].exchangeID, status: .cancelled)
         }
     }
 

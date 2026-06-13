@@ -46,7 +46,7 @@ The live Supabase integration should replace the `Mock*Repository` implementatio
 
 The core product model is card-package exchange:
 
-- A customer creates a grooming task card as a local package. It contains the pet snapshot, pet photo snapshot references, appointment date, time window, style goal, notes, search area, 5 MB style-reference image slot, private owner score, and an internal lookup code that is not shown to the customer.
+- A customer creates a grooming task card as a local package. It contains the pet snapshot, pet photo snapshot references, appointment date, time window, style goal, notes, search area, one 10 MB style-reference image slot, private owner score, and an internal lookup code that is not shown to the customer.
 - Groomers publish public profile cards that stay server-addressable. Customer orders store a groomer card link instead of copying the groomer profile locally.
 - Sending a task card creates a groomer inbox package plus two local order records: one in the customer order store and one in the groomer order store.
 - Each order record points to the task-card package and the groomer public-card link, and tracks `waiting_reply`, `accepted`, `rejected`, `cancelled`, or `completed`.

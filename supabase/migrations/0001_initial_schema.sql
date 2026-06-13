@@ -46,7 +46,10 @@ create table public.pets (
   ai_detected_size text,
   ai_risk_flags text[] default '{}',
   ai_profile_summary text,
-  ai_last_analyzed_at timestamp with time zone
+  ai_last_analyzed_at timestamp with time zone,
+  local_profile_url text,
+  server_profile_url text,
+  profile_card_version integer not null default 1
 );
 
 create table public.pet_photos (
@@ -174,8 +177,8 @@ create table public.contact_events (
 
 create table public.card_access_links (
   id uuid primary key default gen_random_uuid(),
-  card_kind text not null check (card_kind in ('customer_task', 'groomer_profile', 'exchange_order')),
-  storage_scope text not null check (storage_scope in ('customer_local_package', 'public_server_card', 'groomer_inbox_package', 'customer_order_store', 'groomer_order_store')),
+  card_kind text not null check (card_kind in ('customer_task', 'pet_profile', 'groomer_profile', 'exchange_order')),
+  storage_scope text not null check (storage_scope in ('customer_local_package', 'customer_pet_profile_store', 'server_pet_profile_store', 'public_server_card', 'groomer_inbox_package', 'customer_order_store', 'groomer_order_store')),
   owner_role text not null check (owner_role in ('pet_owner', 'groomer')),
   owner_entity_id uuid not null,
   card_id uuid not null,
@@ -185,7 +188,22 @@ create table public.card_access_links (
 );
 
 comment on table public.card_access_links is
-  'Addressable card/package/order links. Customer task cards can live in local packages or groomer inbox packages; groomer profile cards are public server cards; exchange orders live in each client order store.';
+  'Addressable card/package/order links. Customer task cards can live in local packages or groomer inbox packages; pet profile packages live in local and server profile stores; groomer profile cards are public server cards; exchange orders live in each client order store.';
+
+create table public.pet_profile_packages (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid references public.pets(id) on delete cascade,
+  user_id uuid references public.users(id) on delete cascade,
+  pet_snapshot jsonb not null,
+  photo_snapshots jsonb not null default '[]'::jsonb,
+  local_profile_link jsonb not null default '{}'::jsonb,
+  server_profile_link jsonb not null default '{}'::jsonb,
+  updated_at timestamp with time zone default now(),
+  unique (pet_id)
+);
+
+comment on table public.pet_profile_packages is
+  'Packaged pet profile container. The customer app stores a local package and exposes a server profile link that task cards can reference for groomer review.';
 
 create table public.grooming_tasks (
   id uuid primary key default gen_random_uuid(),
@@ -196,6 +214,7 @@ create table public.grooming_tasks (
   card_version integer not null default 1,
   pet_snapshot jsonb not null,
   pet_photo_snapshots jsonb not null default '[]'::jsonb,
+  pet_profile_link jsonb not null default '{}'::jsonb,
   service_type text not null,
   appointment_date date not null,
   time_window text not null,
@@ -218,8 +237,8 @@ create table public.grooming_tasks (
   reference_image_storage_path text,
   reference_image_file_name text,
   reference_image_mime_type text default 'image/jpeg',
-  reference_image_byte_size integer check (reference_image_byte_size is null or (reference_image_byte_size >= 0 and reference_image_byte_size <= 5242880)),
-  reference_image_max_bytes integer not null default 5242880 check (reference_image_max_bytes = 5242880),
+  reference_image_byte_size integer check (reference_image_byte_size is null or (reference_image_byte_size >= 0 and reference_image_byte_size <= 10485760)),
+  reference_image_max_bytes integer not null default 10485760 check (reference_image_max_bytes = 10485760),
   owner_hidden_score numeric check (owner_hidden_score is null or (owner_hidden_score >= 1 and owner_hidden_score <= 5)),
   owner_hidden_score_source text,
   owner_hidden_score_last_evaluated_at timestamp with time zone,
@@ -236,12 +255,14 @@ comment on column public.grooming_tasks.local_package_url is
   'Customer-side local task-card package address. It is the source card package before the card is sent to a groomer.';
 comment on column public.grooming_tasks.pet_snapshot is
   'Frozen copy of the pet profile at task-card generation time, so later pet edits do not change the task request.';
+comment on column public.grooming_tasks.pet_profile_link is
+  'Server pet profile package access link. Groomers open this from task detail to inspect the full packaged pet profile.';
 comment on column public.grooming_tasks.search_radius_miles is
   'Customer-selected groomer discovery radius in miles. MVP uses city/service-area matching until real location services are connected.';
 comment on column public.grooming_tasks.search_address_source is
   'Source of the task-card address: current location, saved profile address, or a manual standardized address.';
 comment on column public.grooming_tasks.reference_image_byte_size is
-  'Reference image upload must be 5 MB or smaller.';
+  'Reference image upload must be 10 MB or smaller. MVP allows one style reference image per task card.';
 comment on column public.grooming_tasks.owner_hidden_score is
   'Private groomer-visible client score derived from the previous groomer evaluation. Do not expose in pet-owner API responses or owner RLS policies.';
 
@@ -345,6 +366,8 @@ create table public.feature_flags (
 
 create index pets_user_id_idx on public.pets(user_id);
 create index pet_photos_pet_id_idx on public.pet_photos(pet_id);
+create index pet_profile_packages_pet_id_idx on public.pet_profile_packages(pet_id);
+create index pet_profile_packages_user_id_idx on public.pet_profile_packages(user_id);
 create index groomers_city_idx on public.groomers(city);
 create index groomers_owner_user_id_idx on public.groomers(owner_user_id);
 create index groomers_status_idx on public.groomers(status);
@@ -376,6 +399,9 @@ create trigger set_users_updated_at before update on public.users
 for each row execute function public.set_updated_at();
 
 create trigger set_pets_updated_at before update on public.pets
+for each row execute function public.set_updated_at();
+
+create trigger set_pet_profile_packages_updated_at before update on public.pet_profile_packages
 for each row execute function public.set_updated_at();
 
 create trigger set_groomers_updated_at before update on public.groomers

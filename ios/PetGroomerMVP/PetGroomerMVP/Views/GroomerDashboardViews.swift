@@ -611,8 +611,19 @@ struct ScheduledTaskDetailView: View {
                         if !task.specialNotes.isEmpty {
                             detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
                         }
-                        detailRow("Reference", value: task.referenceImageSlot.displayTitle, icon: task.styleReferenceSource?.iconName ?? "photo")
+                        StyleReferenceImageButton(slot: task.referenceImageSlot)
                         detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
+                        if let package = model.petProfilePackage(for: task.petProfileLink) {
+                            NavigationLink {
+                                PetProfilePackageDetailView(package: package)
+                                    .environmentObject(model)
+                            } label: {
+                                PetProfileAccessRow(link: task.petProfileLink, photoCount: package.photoSnapshots.count)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            detailRow("Pet profile", value: task.petProfileLink.compactURL, icon: "doc.text.magnifyingglass")
+                        }
                         detailRow("Inbox package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
                         detailRow("Groomer card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
                         if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
@@ -779,6 +790,36 @@ struct GroomerTaskSubmissionCard: View {
     }
 }
 
+struct PetProfileAccessRow: View {
+    let link: CardAccessLink
+    let photoCount: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Pet profile")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text("Open full profile package")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                Text("\(photoCount) photos · \(link.compactURL)")
+                    .font(.caption)
+                    .foregroundStyle(PetTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
 struct GroomingTaskSubmissionDetailView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showChat = false
@@ -822,9 +863,19 @@ struct GroomingTaskSubmissionDetailView: View {
                         if !task.specialNotes.isEmpty {
                             detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
                         }
-                        detailRow("Reference", value: task.referenceImageSlot.displayTitle, icon: task.styleReferenceSource?.iconName ?? "photo")
+                        StyleReferenceImageButton(slot: task.referenceImageSlot)
                         detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
-                        detailRow("Pet profile", value: "\(task.petPhotoSnapshots.count) photos captured with full profile snapshot", icon: "doc.text.magnifyingglass")
+                        if let package = model.petProfilePackage(for: task.petProfileLink) {
+                            NavigationLink {
+                                PetProfilePackageDetailView(package: package)
+                                    .environmentObject(model)
+                            } label: {
+                                PetProfileAccessRow(link: task.petProfileLink, photoCount: package.photoSnapshots.count)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            detailRow("Pet profile", value: task.petProfileLink.compactURL, icon: "doc.text.magnifyingglass")
+                        }
                         detailRow("Task card package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
                         detailRow("Groomer public card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
                         if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
@@ -1380,7 +1431,7 @@ struct GroomerTaskDataCard: View {
             Label("\(task.searchArea.locationTitle) · \(task.searchArea.rangeTitle)", systemImage: "location.fill")
             Label(petDetails, systemImage: "pawprint.fill")
             Label(task.styleGoal, systemImage: "scissors")
-            Label(task.referenceImageSlot.displayTitle, systemImage: task.styleReferenceSource?.iconName ?? "photo.badge.plus")
+            StyleReferenceImageButton(slot: task.referenceImageSlot)
             Label("Pet snapshot includes \(task.petPhotoSnapshots.count) profile photos and full profile fields.", systemImage: "doc.text.magnifyingglass")
             Label("Hidden score source: \(task.ownerHiddenScore.source)", systemImage: "lock.shield")
         }

@@ -111,6 +111,8 @@ struct Pet: Identifiable, Codable, Hashable {
     var aiRiskFlags: [String]
     var aiProfileSummary: String?
     var aiLastAnalyzedAt: Date?
+    var localProfileLink: CardAccessLink? = nil
+    var serverProfileLink: CardAccessLink? = nil
 }
 
 enum PetPhotoType: String, Codable, CaseIterable, Identifiable {
@@ -133,6 +135,7 @@ struct PetPhoto: Identifiable, Codable, Hashable {
     var photoType: PetPhotoType
     var isPrimary: Bool
     var createdAt: Date
+    var imageData: Data? = nil
 }
 
 enum GroomingTaskService: String, Codable, CaseIterable, Identifiable {
@@ -204,7 +207,7 @@ enum GroomingTaskStyleReferenceSource: String, Codable, CaseIterable, Identifiab
 }
 
 struct GroomingTaskReferenceImageSlot: Codable, Hashable {
-    static let maxByteSize = 5 * 1024 * 1024
+    static let maxByteSize = 10 * 1024 * 1024
 
     var source: GroomingTaskStyleReferenceSource?
     var localReference: String?
@@ -213,9 +216,10 @@ struct GroomingTaskReferenceImageSlot: Codable, Hashable {
     var mimeType: String
     var byteSize: Int?
     var maxByteSize: Int
+    var imageData: Data?
 
     var hasImage: Bool {
-        source != nil
+        imageData != nil
     }
 
     var isWithinSizeLimit: Bool {
@@ -224,19 +228,20 @@ struct GroomingTaskReferenceImageSlot: Codable, Hashable {
     }
 
     var displayTitle: String {
-        guard let source else { return "Reference image slot · max 5 MB" }
-        return "\(source.displayTitle) · max 5 MB"
+        hasImage ? "Style reference photo attached" : "No style reference photo"
     }
 
-    static func reserved(source: GroomingTaskStyleReferenceSource?, sequenceCode: String) -> GroomingTaskReferenceImageSlot {
-        GroomingTaskReferenceImageSlot(
+    static func reserved(source: GroomingTaskStyleReferenceSource?, sequenceCode: String, imageData: Data?) -> GroomingTaskReferenceImageSlot {
+        let hasImageData = imageData != nil
+        return GroomingTaskReferenceImageSlot(
             source: source,
-            localReference: source == nil ? nil : "mock://task-reference-\(sequenceCode.lowercased())",
-            storagePath: source == nil ? nil : "task-reference-images/\(sequenceCode.lowercased()).jpg",
-            fileName: source == nil ? nil : "\(sequenceCode.lowercased())-style-reference.jpg",
+            localReference: hasImageData ? "mock://task-reference-\(sequenceCode.lowercased())" : nil,
+            storagePath: hasImageData ? "task-reference-images/\(sequenceCode.lowercased()).jpg" : nil,
+            fileName: hasImageData ? "\(sequenceCode.lowercased())-style-reference.jpg" : nil,
             mimeType: "image/jpeg",
-            byteSize: source == nil ? nil : 1_250_000,
-            maxByteSize: Self.maxByteSize
+            byteSize: imageData?.count,
+            maxByteSize: Self.maxByteSize,
+            imageData: imageData
         )
     }
 }
@@ -306,6 +311,7 @@ struct GroomingTaskSearchArea: Codable, Hashable {
 
 enum InformationCardKind: String, Codable, CaseIterable, Identifiable {
     case customerTask = "customer_task"
+    case petProfile = "pet_profile"
     case groomerProfile = "groomer_profile"
     case exchangeOrder = "exchange_order"
 
@@ -314,6 +320,8 @@ enum InformationCardKind: String, Codable, CaseIterable, Identifiable {
 
 enum CardStorageScope: String, Codable, CaseIterable, Identifiable {
     case customerLocalPackage = "customer_local_package"
+    case customerPetProfileStore = "customer_pet_profile_store"
+    case serverPetProfileStore = "server_pet_profile_store"
     case publicServerCard = "public_server_card"
     case groomerInboxPackage = "groomer_inbox_package"
     case customerOrderStore = "customer_order_store"
@@ -324,12 +332,25 @@ enum CardStorageScope: String, Codable, CaseIterable, Identifiable {
     var displayTitle: String {
         switch self {
         case .customerLocalPackage: "Customer local task package"
+        case .customerPetProfileStore: "Customer local pet profile"
+        case .serverPetProfileStore: "Server pet profile package"
         case .publicServerCard: "Public groomer card"
         case .groomerInboxPackage: "Groomer inbox package"
         case .customerOrderStore: "Customer order store"
         case .groomerOrderStore: "Groomer order store"
         }
     }
+}
+
+struct PetProfilePackage: Identifiable, Codable, Hashable {
+    let id: UUID
+    var petID: UUID
+    var userID: UUID
+    var petSnapshot: Pet
+    var photoSnapshots: [PetPhoto]
+    var localProfileLink: CardAccessLink
+    var serverProfileLink: CardAccessLink
+    var updatedAt: Date
 }
 
 struct CardAccessLink: Identifiable, Codable, Hashable {
@@ -363,7 +384,7 @@ enum CardExchangeOrderStatus: String, Codable, CaseIterable, Identifiable {
         case .waitingReply: "Waiting reply"
         case .accepted: "Accepted"
         case .rejected: "Rejected"
-        case .cancelled: "Cancelled"
+        case .cancelled: "Canceled"
         case .completed: "Completed"
         }
     }
@@ -407,6 +428,7 @@ struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     var petID: UUID
     var petSnapshot: Pet
     var petPhotoSnapshots: [PetPhoto]
+    var petProfileLink: CardAccessLink
     var service: GroomingTaskService
     var targetDate: Date
     var timeWindow: GroomingTaskTimeWindow
@@ -437,17 +459,17 @@ enum GroomingTaskSubmissionStatus: String, Codable, CaseIterable, Identifiable {
         case .accepted: "Accepted"
         case .declined: "Rejected"
         case .completed: "Completed"
-        case .cancelled: "Cancelled"
+        case .cancelled: "Canceled"
         }
     }
 
     var customerActionTitle: String {
         switch self {
-        case .sent: "Waiting for Reply"
-        case .accepted: "Task Accepted"
-        case .declined: "Rejected"
-        case .completed: "Task Completed"
-        case .cancelled: "Task Cancelled"
+        case .sent: "Revoke Request"
+        case .accepted: "Send Task Card"
+        case .declined: "Send Task Card"
+        case .completed: "Send Task Card"
+        case .cancelled: "Send Task Card"
         }
     }
 }

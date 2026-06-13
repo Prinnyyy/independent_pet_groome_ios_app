@@ -4,7 +4,6 @@ import UIKit
 struct GroomerProfileView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openURL) private var openURL
-    @State private var showQuote = false
     @State private var showReview = false
     @State private var showReport = false
 
@@ -12,131 +11,62 @@ struct GroomerProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top, spacing: 12) {
-                        MockPhotoBlock(title: groomer.name, systemImage: "scissors", height: 96)
-                            .frame(width: 96)
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(groomer.name)
-                                    .font(.largeTitle.weight(.bold))
-                                    .fontDesign(.rounded)
-                                    .foregroundStyle(PetTheme.ink)
-                                Spacer()
-                                Button {
-                                    model.toggleFavorite(targetType: .groomer, targetID: groomer.id)
-                                } label: {
-                                    Image(systemName: model.isFavorite(targetType: .groomer, targetID: groomer.id) ? "heart.fill" : "heart")
-                                        .font(.title2)
-                                        .foregroundStyle(PetTheme.coral)
-                                        .frame(width: 40, height: 40)
-                                }
-                            }
-                            HStack {
-                                Text(groomer.city)
-                                    .foregroundStyle(PetTheme.muted)
-                                if groomer.isVerified {
-                                    VerifiedBadge()
-                                }
-                            }
-                            RatingPill(rating: groomer.rating, count: groomer.reviewCount)
-                        }
-                    }
+            VStack(spacing: 13) {
+                profileHero
 
-                    Text(groomer.bio)
-                        .font(.body)
-                        .foregroundStyle(PetTheme.muted)
+                taskCardActionPanel
 
-                    HStack(spacing: 8) {
-                        Chip(text: "\(Int(groomer.yearsExperience)) years")
-                        Chip(text: "$\(Int(groomer.priceMin))-$\(Int(groomer.priceMax))")
-                        Chip(text: "\(Int(groomer.serviceRadius)) mi", color: PetTheme.sky)
-                    }
-                }
-                .taskCard()
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-
-                VStack(spacing: 10) {
-                    Button {
-                        showQuote = true
-                    } label: {
-                        Label("Request quote", systemImage: "text.bubble.fill")
-                    }
-                    .buttonStyle(CoralButtonStyle())
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                        ForEach(contactMethods, id: \.self) { method in
-                            Button {
-                                openContact(method)
-                            } label: {
-                                Label(method.label, systemImage: icon(for: method))
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(QuietButtonStyle())
-                        }
-                    }
-                }
-                .padding(.horizontal, 18)
-
-                profileSection(title: "Service area") {
-                    WrapChips(items: groomer.serviceAreas + groomer.serviceMethods, color: PetTheme.sky)
+                profileSection(title: "Service fit", icon: "checklist.checked") {
+                    WrapChips(
+                        items: groomer.serviceMethods + groomer.sizeAccepted + [groomer.acceptsCats ? "Cats accepted" : "Dogs only"],
+                        color: PetTheme.mint
+                    )
                 }
 
-                profileSection(title: "Specialties") {
+                profileSection(title: "Specialties", icon: "sparkles") {
                     WrapChips(items: groomer.specialties, color: PetTheme.apricot)
                 }
 
-                profileSection(title: "Languages and pet fit") {
-                    WrapChips(items: groomer.languages + groomer.sizeAccepted + [groomer.acceptsCats ? "Cats accepted" : "Dogs only"], color: PetTheme.mint)
+                profileSection(title: "Area and language", icon: "mappin.and.ellipse") {
+                    WrapChips(items: groomer.serviceAreas + groomer.languages, color: PetTheme.sky)
                 }
 
-                SectionHeader(title: "Portfolio")
-                ForEach(model.portfolio(for: groomer)) { item in
-                    NavigationLink {
-                        PortfolioDetailView(item: item)
-                    } label: {
-                        PortfolioCard(
-                            item: item,
-                            isSaved: model.isFavorite(targetType: .portfolio, targetID: item.id),
-                            onSave: { model.toggleFavorite(targetType: .portfolio, targetID: item.id) }
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 18)
-                }
+                portfolioSection
 
-                SectionHeader(title: "Reviews", actionTitle: "Write") {
-                    showReview = true
-                }
-
-                let reviews = model.reviews(for: groomer)
-                if reviews.isEmpty {
-                    EmptyState(title: "No reviews yet", message: "Be the first to write a structured review.", systemImage: "star")
-                } else {
-                    ForEach(reviews) { review in
-                        ReviewRow(review: review)
-                            .padding(.horizontal, 18)
+                if !contactMethods.isEmpty {
+                    profileSection(title: "Profile links", icon: "link") {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                            ForEach(contactMethods, id: \.self) { method in
+                                Button {
+                                    openContact(method)
+                                } label: {
+                                    Label(method.label, systemImage: icon(for: method))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.82)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(QuietButtonStyle())
+                            }
+                        }
                     }
                 }
+
+                reviewsSection
 
                 Button {
                     showReport = true
                 } label: {
                     Label("Report profile", systemImage: "flag")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(QuietButtonStyle())
                 .padding(.horizontal, 18)
             }
+            .padding(.top, 12)
             .padding(.bottom, 28)
         }
         .navigationBarTitleDisplayMode(.inline)
         .appBackground()
-        .sheet(isPresented: $showQuote) {
-            QuoteRequestView(groomer: groomer)
-                .environmentObject(model)
-        }
         .sheet(isPresented: $showReview) {
             WriteReviewView(groomer: groomer)
                 .environmentObject(model)
@@ -147,10 +77,221 @@ struct GroomerProfileView: View {
         }
     }
 
+    private var profileHero: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                MockPhotoBlock(title: initials, systemImage: "scissors", height: 92)
+                    .frame(width: 92)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(groomer.name)
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundStyle(PetTheme.ink)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.82)
+
+                            HStack(spacing: 7) {
+                                Label(groomer.city, systemImage: "mappin.and.ellipse")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PetTheme.muted)
+                                if groomer.isVerified {
+                                    VerifiedBadge()
+                                }
+                            }
+                        }
+
+                        Spacer(minLength: 6)
+
+                        Button {
+                            model.toggleFavorite(targetType: .groomer, targetID: groomer.id)
+                        } label: {
+                            Image(systemName: model.isFavorite(targetType: .groomer, targetID: groomer.id) ? "heart.fill" : "heart")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(model.isFavorite(targetType: .groomer, targetID: groomer.id) ? PetTheme.coral : PetTheme.muted)
+                                .frame(width: 38, height: 38)
+                                .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(model.isFavorite(targetType: .groomer, targetID: groomer.id) ? "Remove saved groomer" : "Save groomer")
+                    }
+
+                    RatingPill(rating: groomer.rating, count: groomer.reviewCount)
+                }
+            }
+
+            Text(groomer.bio)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(PetTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                GridRow {
+                    profileMetric(title: "Experience", value: "\(Int(groomer.yearsExperience)) years", icon: "rosette")
+                    profileMetric(title: "Price", value: "$\(Int(groomer.priceMin))-$\(Int(groomer.priceMax))", icon: "tag.fill")
+                }
+                GridRow {
+                    profileMetric(title: "Range", value: "\(Int(groomer.serviceRadius)) mi", icon: "scope")
+                    profileMetric(title: "Portfolio", value: "\(model.portfolio(for: groomer).count) looks", icon: "photo.stack.fill")
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.24)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.055), radius: 12, x: 0, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.78), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
+    private var taskCardActionPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "shippingbox.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(PetTheme.coral)
+                    .frame(width: 34, height: 34)
+                    .background(PetTheme.apricot.opacity(0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Task card exchange")
+                        .font(.headline.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                    Text(taskActionHint)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                if let status = currentTaskSubmission?.status {
+                    Chip(text: status.label, color: statusColor(status))
+                }
+            }
+
+            taskCardActionButton
+        }
+        .padding(12)
+        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.55), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
+    @ViewBuilder
+    private var taskCardActionButton: some View {
+        if taskActionIsQuiet {
+            Button {
+                sendOrRevokeCurrentTask()
+            } label: {
+                Label(taskActionTitle, systemImage: taskActionIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(taskActionIsDisabled)
+            .opacity(taskActionIsDisabled ? 0.56 : 1)
+        } else {
+            Button {
+                sendOrRevokeCurrentTask()
+            } label: {
+                Label(taskActionTitle, systemImage: taskActionIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(CoralButtonStyle())
+            .disabled(taskActionIsDisabled)
+            .opacity(taskActionIsDisabled ? 0.56 : 1)
+        }
+    }
+
+    private var portfolioSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Portfolio", systemImage: "photo.stack.fill")
+                    .font(.headline.weight(.semibold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(PetTheme.ink)
+                Spacer()
+                Text("\(model.portfolio(for: groomer).count) looks")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(model.portfolio(for: groomer)) { item in
+                    NavigationLink {
+                        PortfolioDetailView(item: item)
+                    } label: {
+                        MockPhotoBlock(
+                            title: item.styleName,
+                            systemImage: item.petSpecies == .cat ? "cat.fill" : "dog.fill",
+                            height: 132
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .background(PetTheme.porcelain, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.72), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
+    private var reviewsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Reviews", systemImage: "star.fill")
+                    .font(.headline.weight(.semibold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(PetTheme.ink)
+                Spacer()
+                Button("Write") {
+                    showReview = true
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.coralDark)
+            }
+
+            let reviews = model.reviews(for: groomer)
+            if reviews.isEmpty {
+                EmptyState(title: "No reviews yet", message: "Reviews will appear after completed task cards.", systemImage: "star")
+            } else {
+                ForEach(reviews) { review in
+                    ReviewRow(review: review)
+                }
+            }
+        }
+        .padding(14)
+        .background(PetTheme.porcelain, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.72), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
     private var contactMethods: [ContactMethod] {
         var methods: [ContactMethod] = []
         if groomer.phone != nil { methods.append(.phone) }
-        if groomer.smsNumber != nil { methods.append(.sms) }
         if groomer.instagramURL != nil { methods.append(.instagram) }
         if groomer.wechatID != nil { methods.append(.wechat) }
         if groomer.websiteURL != nil { methods.append(.website) }
@@ -158,16 +299,142 @@ struct GroomerProfileView: View {
         return methods
     }
 
-    private func profileSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private var currentTaskSubmission: GroomingTaskSubmission? {
+        guard let task = model.currentGroomingTask else { return nil }
+        return model.taskSubmission(for: task, groomer: groomer)
+    }
+
+    private var taskActionTitle: String {
+        guard model.currentGroomingTask != nil else { return "Create Task First" }
+        switch currentTaskSubmission?.status {
+        case .sent:
+            return "Revoke Card"
+        case .accepted:
+            return "Accepted"
+        case .completed:
+            return "Completed"
+        default:
+            return "Send Card"
+        }
+    }
+
+    private var taskActionIcon: String {
+        guard model.currentGroomingTask != nil else { return "doc.badge.plus" }
+        switch currentTaskSubmission?.status {
+        case .sent:
+            return "arrow.uturn.backward.circle.fill"
+        case .accepted:
+            return "checkmark.seal.fill"
+        case .completed:
+            return "checkmark.circle.fill"
+        default:
+            return "paperplane.fill"
+        }
+    }
+
+    private var taskActionHint: String {
+        guard let task = model.currentGroomingTask else {
+            return "Create a task card on Home before sending a request to this groomer."
+        }
+        if let submission = currentTaskSubmission {
+            switch submission.status {
+            case .sent:
+                return "Your \(task.service.rawValue.lowercased()) card is waiting for a reply."
+            case .accepted:
+                return "This groomer accepted your current task card."
+            case .declined:
+                return "This groomer declined the last request. You can send an updated card."
+            case .completed:
+                return "This task card was completed."
+            case .cancelled:
+                return "The previous request was canceled. You can send again."
+            }
+        }
+        return "Send your current \(task.service.rawValue.lowercased()) card to start the exchange."
+    }
+
+    private var taskActionIsDisabled: Bool {
+        guard model.currentGroomingTask != nil else { return true }
+        return currentTaskSubmission?.status == .accepted || currentTaskSubmission?.status == .completed
+    }
+
+    private var taskActionIsQuiet: Bool {
+        currentTaskSubmission?.status == .sent
+    }
+
+    private var initials: String {
+        groomer.name
+            .split(separator: " ")
+            .compactMap { $0.first }
+            .prefix(2)
+            .map(String.init)
+            .joined()
+    }
+
+    private func sendOrRevokeCurrentTask() {
+        guard model.currentGroomingTask != nil else { return }
+        if let submission = currentTaskSubmission, submission.status == .sent {
+            model.revokeTaskSubmission(id: submission.id)
+        } else {
+            model.sendCurrentTask(to: groomer)
+        }
+    }
+
+    private func profileSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
+            Label(title, systemImage: icon)
                 .font(.headline.weight(.semibold))
                 .fontDesign(.rounded)
+                .foregroundStyle(PetTheme.ink)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .taskCard()
+        .padding(14)
+        .background(PetTheme.porcelain, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.72), lineWidth: 1)
+        )
         .padding(.horizontal, 18)
+    }
+
+    private func profileMetric(title: String, value: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: icon)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.coral)
+                .frame(width: 22, height: 22)
+                .background(PetTheme.apricot.opacity(0.32), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.caption.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(PetTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+        )
+    }
+
+    private func statusColor(_ status: GroomingTaskSubmissionStatus) -> Color {
+        switch status {
+        case .sent:
+            return PetTheme.apricot
+        case .accepted, .completed:
+            return PetTheme.mint
+        case .declined, .cancelled:
+            return Color.gray.opacity(0.24)
+        }
     }
 
     private func icon(for method: ContactMethod) -> String {
@@ -190,9 +457,7 @@ struct GroomerProfileView: View {
                 openURL(url)
             }
         case .sms:
-            if let sms = groomer.smsNumber, let url = URL(string: "sms:\(sms)") {
-                openURL(url)
-            }
+            break
         case .instagram:
             if let instagram = groomer.instagramURL, let url = URL(string: instagram) {
                 openURL(url)
@@ -208,7 +473,7 @@ struct GroomerProfileView: View {
                 openURL(url)
             }
         case .quoteRequest:
-            showQuote = true
+            break
         }
     }
 }

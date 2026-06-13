@@ -45,17 +45,29 @@ struct GroomerCard: View {
     var onSecondaryAction: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .top, spacing: 12) {
                 MockPhotoBlock(title: initials, systemImage: "scissors", height: 76)
                     .frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(groomer.name)
-                            .font(.title3.weight(.bold))
-                            .fontDesign(.rounded)
-                            .foregroundStyle(PetTheme.ink)
-                            .lineLimit(1)
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(groomer.name)
+                                .font(.title3.weight(.bold))
+                                .fontDesign(.rounded)
+                                .foregroundStyle(PetTheme.ink)
+                                .lineLimit(1)
+
+                            HStack(spacing: 7) {
+                                Label(groomer.city, systemImage: "mappin.and.ellipse")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PetTheme.muted)
+                                    .lineLimit(1)
+                                if groomer.isVerified {
+                                    VerifiedBadge()
+                                }
+                            }
+                        }
                         Spacer()
                         Button(action: onSave) {
                             Image(systemName: isSaved ? "heart.fill" : "heart")
@@ -65,14 +77,7 @@ struct GroomerCard: View {
                         }
                         .accessibilityLabel(isSaved ? "Remove saved groomer" : "Save groomer")
                     }
-                    HStack(spacing: 8) {
-                        Text(groomer.city)
-                            .font(.caption)
-                            .foregroundStyle(PetTheme.muted)
-                        if groomer.isVerified {
-                            VerifiedBadge()
-                        }
-                    }
+
                     HStack(spacing: 8) {
                         RatingPill(rating: groomer.rating, count: groomer.reviewCount)
                         Text("$\(Int(groomer.priceMin))-$\(Int(groomer.priceMax))")
@@ -85,7 +90,7 @@ struct GroomerCard: View {
             Text(groomer.bio)
                 .font(.subheadline)
                 .foregroundStyle(PetTheme.muted)
-                .lineLimit(3)
+                .lineLimit(2)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
@@ -95,15 +100,11 @@ struct GroomerCard: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                ForEach(portfolio.prefix(3)) { item in
-                    MockPhotoBlock(title: item.styleName, systemImage: item.petSpecies == .cat ? "cat.fill" : "dog.fill", height: 78)
-                }
-            }
+            portfolioRail
 
             HStack(spacing: 9) {
                 Button(action: onContact) {
-                    Label(contactTitle, systemImage: contactIcon)
+                    actionLabel(title: contactTitle, icon: contactIcon)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(CoralButtonStyle())
@@ -112,14 +113,30 @@ struct GroomerCard: View {
 
                 if let secondaryTitle, let onSecondaryAction {
                     Button(action: onSecondaryAction) {
-                        Label(secondaryTitle, systemImage: secondaryIcon)
+                        actionLabel(title: secondaryTitle, icon: secondaryIcon)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(QuietButtonStyle())
                 }
             }
+            .frame(height: 46)
         }
-        .taskCard()
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.18)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.055), radius: 12, x: 0, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.78), lineWidth: 1)
+        )
     }
 
     private var initials: String {
@@ -129,6 +146,76 @@ struct GroomerCard: View {
             .prefix(2)
             .map(String.init)
             .joined()
+    }
+
+    private var portfolioRail: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Recent work")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.coralDark)
+                Spacer()
+                Text("\(portfolio.count) looks")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(portfolio.prefix(7)) { item in
+                        portfolioTile(item)
+                    }
+
+                    Button {
+                        onSecondaryAction?()
+                    } label: {
+                        VStack(spacing: 7) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .font(.title2.weight(.semibold))
+                            Text("See all")
+                                .font(.caption2.weight(.bold))
+                        }
+                        .foregroundStyle(PetTheme.coral)
+                        .frame(width: 82, height: 82)
+                        .background(PetTheme.apricot.opacity(0.28), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(PetTheme.coral.opacity(0.18), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onSecondaryAction == nil)
+                    .opacity(onSecondaryAction == nil ? 0.55 : 1)
+                }
+                .padding(.vertical, 1)
+            }
+        }
+        .padding(10)
+        .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+        )
+    }
+
+    private func portfolioTile(_ item: PortfolioItem) -> some View {
+        MockPhotoBlock(
+            title: item.styleName,
+            systemImage: item.petSpecies == .cat ? "cat.fill" : "dog.fill",
+            height: 82
+        )
+        .frame(width: 82)
+    }
+
+    private func actionLabel(title: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.callout.weight(.bold))
+            Text(title)
+                .font(.callout.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 }
 
@@ -145,12 +232,12 @@ struct PetTaskCard: View {
                     .font(.title3.weight(.bold))
                     .fontDesign(.rounded)
                     .foregroundStyle(PetTheme.ink)
-                Text([pet.breed, pet.coatType, pet.coatCondition].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([pet.species.rawValue, pet.breed].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.subheadline)
                     .foregroundStyle(PetTheme.muted)
                     .lineLimit(2)
                 HStack {
-                    Label("\(photoCount)/8 photos", systemImage: "photo.on.rectangle")
+                    Label("\(photoCount) photos", systemImage: "photo.on.rectangle")
                     if let weight = pet.weight {
                         Label("\(Int(weight)) lb", systemImage: "scalemass")
                     }
