@@ -38,7 +38,7 @@ struct ProfileAddress: Codable, Hashable {
     var country: String
 
     var isEmpty: Bool {
-        [streetLine1, streetLine2, city, state, postalCode, country]
+        [streetLine1, streetLine2, city, state, postalCode]
             .allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
@@ -116,15 +116,15 @@ struct Pet: Identifiable, Codable, Hashable {
 }
 
 enum PetPhotoType: String, Codable, CaseIterable, Identifiable {
-    case front = "Front"
-    case side = "Side"
-    case fullBody = "Full body"
-    case coatCloseUp = "Coat close-up"
-    case mattedArea = "Matted area"
-    case styleReference = "Style reference"
-    case other = "Other"
+    case petCard = "Pet card photo"
 
     var id: String { rawValue }
+}
+
+struct PetPhotoImageRenditions: Codable, Hashable {
+    var originalData: Data?
+    var squareThumbnailData: Data?
+    var cardShowcaseData: Data?
 }
 
 struct PetPhoto: Identifiable, Codable, Hashable {
@@ -136,6 +136,15 @@ struct PetPhoto: Identifiable, Codable, Hashable {
     var isPrimary: Bool
     var createdAt: Date
     var imageData: Data? = nil
+    var imageRenditions: PetPhotoImageRenditions? = nil
+
+    var squareDisplayData: Data? {
+        imageRenditions?.squareThumbnailData ?? imageData
+    }
+
+    var showcaseDisplayData: Data? {
+        imageRenditions?.cardShowcaseData ?? imageData
+    }
 }
 
 enum GroomingTaskService: String, Codable, CaseIterable, Identifiable {
@@ -217,9 +226,22 @@ struct GroomingTaskReferenceImageSlot: Codable, Hashable {
     var byteSize: Int?
     var maxByteSize: Int
     var imageData: Data?
+    var imageRenditions: GroomingTaskReferenceImageRenditions? = nil
 
     var hasImage: Bool {
         imageData != nil
+    }
+
+    var thumbnailDisplayData: Data? {
+        imageRenditions?.thumbnailData ?? imageData
+    }
+
+    var previewDisplayData: Data? {
+        imageRenditions?.previewData ?? imageData
+    }
+
+    var fullScreenDisplayData: Data? {
+        imageRenditions?.fullScreenData ?? imageData
     }
 
     var isWithinSizeLimit: Bool {
@@ -231,7 +253,12 @@ struct GroomingTaskReferenceImageSlot: Codable, Hashable {
         hasImage ? "Style reference photo attached" : "No style reference photo"
     }
 
-    static func reserved(source: GroomingTaskStyleReferenceSource?, sequenceCode: String, imageData: Data?) -> GroomingTaskReferenceImageSlot {
+    static func reserved(
+        source: GroomingTaskStyleReferenceSource?,
+        sequenceCode: String,
+        imageData: Data?,
+        imageRenditions: GroomingTaskReferenceImageRenditions? = nil
+    ) -> GroomingTaskReferenceImageSlot {
         let hasImageData = imageData != nil
         return GroomingTaskReferenceImageSlot(
             source: source,
@@ -241,9 +268,17 @@ struct GroomingTaskReferenceImageSlot: Codable, Hashable {
             mimeType: "image/jpeg",
             byteSize: imageData?.count,
             maxByteSize: Self.maxByteSize,
-            imageData: imageData
+            imageData: imageData,
+            imageRenditions: imageRenditions
         )
     }
+}
+
+struct GroomingTaskReferenceImageRenditions: Codable, Hashable {
+    var originalData: Data?
+    var thumbnailData: Data?
+    var previewData: Data?
+    var fullScreenData: Data?
 }
 
 struct GroomingTaskOwnerHiddenScore: Codable, Hashable {
@@ -266,8 +301,8 @@ enum GroomingTaskAddressSource: String, Codable, CaseIterable, Identifiable, Has
     var displayTitle: String {
         switch self {
         case .currentLocation: "Current location"
-        case .savedProfileAddress: "Saved address"
-        case .manualEntry: "Manual address"
+        case .savedProfileAddress: "Home address"
+        case .manualEntry: "New address"
         }
     }
 
@@ -276,6 +311,34 @@ enum GroomingTaskAddressSource: String, Codable, CaseIterable, Identifiable, Has
         case .currentLocation: "location.fill"
         case .savedProfileAddress: "house.fill"
         case .manualEntry: "mappin.and.ellipse"
+        }
+    }
+}
+
+enum GroomingTaskServiceLocation: String, Codable, CaseIterable, Identifiable, Hashable {
+    case atCustomerAddress = "at_customer_address"
+    case atGroomerStudio = "at_groomer_studio"
+
+    var id: String { rawValue }
+
+    var displayTitle: String {
+        switch self {
+        case .atCustomerAddress: "At my address"
+        case .atGroomerStudio: "At groomer studio"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .atCustomerAddress: "Groomer comes to me"
+        case .atGroomerStudio: "I go to studio"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .atCustomerAddress: "house.fill"
+        case .atGroomerStudio: "scissors"
         }
     }
 }
@@ -332,8 +395,8 @@ enum CardStorageScope: String, Codable, CaseIterable, Identifiable {
     var displayTitle: String {
         switch self {
         case .customerLocalPackage: "Customer local task package"
-        case .customerPetProfileStore: "Customer local pet profile"
-        case .serverPetProfileStore: "Server pet profile package"
+        case .customerPetProfileStore: "Customer local pet card"
+        case .serverPetProfileStore: "Server pet card package"
         case .publicServerCard: "Public groomer card"
         case .groomerInboxPackage: "Groomer inbox package"
         case .customerOrderStore: "Customer order store"
@@ -432,6 +495,7 @@ struct GroomingTaskCardData: Identifiable, Codable, Hashable {
     var service: GroomingTaskService
     var targetDate: Date
     var timeWindow: GroomingTaskTimeWindow
+    var serviceLocation: GroomingTaskServiceLocation
     var searchArea: GroomingTaskSearchArea
     var styleGoal: String
     var specialNotes: String
@@ -518,11 +582,69 @@ struct GroomingTaskTemplate: Identifiable, Codable, Hashable {
     var petID: UUID
     var service: GroomingTaskService
     var timeWindow: GroomingTaskTimeWindow
+    var serviceLocation: GroomingTaskServiceLocation
     var searchArea: GroomingTaskSearchArea
     var styleGoal: String
     var specialNotes: String
     var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var styleReferenceImageData: Data?
+    var styleReferenceImageRenditions: GroomingTaskReferenceImageRenditions? = nil
     var createdAt: Date
+}
+
+enum TemporaryGroomingTaskContainerState: Int, Codable, Hashable {
+    case noData = 0
+    case editing = 1
+    case completed = 2
+}
+
+struct TemporaryGroomingTaskContainer: Codable, Hashable {
+    var state: TemporaryGroomingTaskContainerState
+    var petID: UUID?
+    var service: GroomingTaskService
+    var targetDate: Date
+    var timeWindow: GroomingTaskTimeWindow
+    var serviceLocation: GroomingTaskServiceLocation
+    var searchArea: GroomingTaskSearchArea
+    var styleGoal: String
+    var specialNotes: String
+    var styleReferenceSource: GroomingTaskStyleReferenceSource?
+    var styleReferenceImageData: Data?
+    var styleReferenceImageRenditions: GroomingTaskReferenceImageRenditions?
+    var completedTask: GroomingTask?
+    var updatedAt: Date
+
+    static func empty(now: Date = Date()) -> TemporaryGroomingTaskContainer {
+        TemporaryGroomingTaskContainer(
+            state: .noData,
+            petID: nil,
+            service: .bath,
+            targetDate: Calendar.current.startOfDay(for: now),
+            timeWindow: .eightAM,
+            serviceLocation: .atCustomerAddress,
+            searchArea: GroomingTaskSearchArea(
+                label: GroomingTaskAddressSource.currentLocation.displayTitle,
+                addressSource: .currentLocation,
+                streetLine1: "",
+                streetLine2: "",
+                city: "",
+                state: "",
+                zipCode: "",
+                country: "United States",
+                radiusMiles: 10,
+                usesCurrentLocation: true,
+                latitude: nil,
+                longitude: nil
+            ),
+            styleGoal: "",
+            specialNotes: "",
+            styleReferenceSource: nil,
+            styleReferenceImageData: nil,
+            styleReferenceImageRenditions: nil,
+            completedTask: nil,
+            updatedAt: now
+        )
+    }
 }
 
 struct Groomer: Identifiable, Codable, Hashable {
@@ -533,6 +655,9 @@ struct Groomer: Identifiable, Codable, Hashable {
     var city: String
     var zipCode: String
     var serviceRadius: Double
+    var studioAddress: ProfileAddress?
+    var mobileServiceRadiusMiles: Double
+    var availableTimeWindows: [GroomingTaskTimeWindow]
     var serviceAreas: [String]
     var languages: [String]
     var yearsExperience: Double
@@ -559,6 +684,20 @@ struct Groomer: Identifiable, Codable, Hashable {
     var aiSkillTags: [String]
     var aiReviewSummary: String?
     var aiLastProcessedAt: Date?
+}
+
+extension Groomer {
+    var offersStudioService: Bool {
+        guard let studioAddress else { return false }
+        return !studioAddress.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !studioAddress.city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !studioAddress.state.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !studioAddress.postalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var offersHouseCallService: Bool {
+        mobileServiceRadiusMiles > 0
+    }
 }
 
 struct PortfolioItem: Identifiable, Codable, Hashable {

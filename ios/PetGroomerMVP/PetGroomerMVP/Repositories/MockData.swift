@@ -79,9 +79,9 @@ enum MockData {
     ]
 
     static let petPhotos: [PetPhoto] = [
-        PetPhoto(id: UUID(), petID: petMochiID, userID: userID, imageURL: "mock://mochi-front", photoType: .front, isPrimary: true, createdAt: .now),
-        PetPhoto(id: UUID(), petID: petMochiID, userID: userID, imageURL: "mock://mochi-coat", photoType: .coatCloseUp, isPrimary: false, createdAt: .now),
-        PetPhoto(id: UUID(), petID: petLunaID, userID: userID, imageURL: "mock://luna-side", photoType: .side, isPrimary: true, createdAt: .now)
+        PetPhoto(id: UUID(), petID: petMochiID, userID: userID, imageURL: "mock://mochi-1", photoType: .petCard, isPrimary: true, createdAt: .now),
+        PetPhoto(id: UUID(), petID: petMochiID, userID: userID, imageURL: "mock://mochi-2", photoType: .petCard, isPrimary: false, createdAt: .now),
+        PetPhoto(id: UUID(), petID: petLunaID, userID: userID, imageURL: "mock://luna-1", photoType: .petCard, isPrimary: true, createdAt: .now)
     ]
 
     static let groomers: [Groomer] = [
@@ -93,6 +93,16 @@ enum MockData {
             city: "Fullerton",
             zipCode: "92832",
             serviceRadius: 12,
+            studioAddress: ProfileAddress(
+                streetLine1: "210 Harbor Blvd",
+                streetLine2: "Suite 4",
+                city: "Fullerton",
+                state: "CA",
+                postalCode: "92832",
+                country: "United States"
+            ),
+            mobileServiceRadiusMiles: 12,
+            availableTimeWindows: [.eightAM, .nineAM, .tenAM, .elevenAM, .noon, .onePM, .twoPM, .threePM, .fourPM],
             serviceAreas: ["Fullerton", "Brea", "Anaheim"],
             languages: ["English", "Korean"],
             yearsExperience: 8,
@@ -128,6 +138,9 @@ enum MockData {
             city: "Irvine",
             zipCode: "92612",
             serviceRadius: 15,
+            studioAddress: nil,
+            mobileServiceRadiusMiles: 15,
+            availableTimeWindows: [.nineAM, .tenAM, .elevenAM, .noon, .onePM, .twoPM, .threePM, .fourPM],
             serviceAreas: ["Irvine", "Tustin", "Costa Mesa"],
             languages: ["English", "Spanish"],
             yearsExperience: 6,
@@ -163,6 +176,16 @@ enum MockData {
             city: "Arcadia",
             zipCode: "91007",
             serviceRadius: 18,
+            studioAddress: ProfileAddress(
+                streetLine1: "88 Duarte Rd",
+                streetLine2: "",
+                city: "Arcadia",
+                state: "CA",
+                postalCode: "91007",
+                country: "United States"
+            ),
+            mobileServiceRadiusMiles: 0,
+            availableTimeWindows: [.tenAM, .elevenAM, .noon, .onePM, .twoPM, .threePM, .fourPM, .fivePM],
             serviceAreas: ["Arcadia", "Pasadena", "Alhambra"],
             languages: ["English", "Mandarin"],
             yearsExperience: 10,

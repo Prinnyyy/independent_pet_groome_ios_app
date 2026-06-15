@@ -6,6 +6,7 @@ struct GroomerProfileView: View {
     @Environment(\.openURL) private var openURL
     @State private var showReview = false
     @State private var showReport = false
+    @State private var showTaskMismatchInfo = false
 
     let groomer: Groomer
 
@@ -29,6 +30,18 @@ struct GroomerProfileView: View {
 
                 profileSection(title: "Area and language", icon: "mappin.and.ellipse") {
                     WrapChips(items: groomer.serviceAreas + groomer.languages, color: PetTheme.sky)
+                }
+
+                profileSection(title: "Service location", icon: "house.and.flag.fill") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        WrapChips(items: serviceLocationChips, color: PetTheme.mint)
+                        if let address = groomer.studioAddress, !address.isEmpty {
+                            Label(address.compactTitle, systemImage: "mappin.and.ellipse")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PetTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
 
                 portfolioSection
@@ -132,7 +145,7 @@ struct GroomerProfileView: View {
                     profileMetric(title: "Price", value: "$\(Int(groomer.priceMin))-$\(Int(groomer.priceMax))", icon: "tag.fill")
                 }
                 GridRow {
-                    profileMetric(title: "Range", value: "\(Int(groomer.serviceRadius)) mi", icon: "scope")
+                    profileMetric(title: "House-call range", value: "\(Int(groomer.mobileServiceRadiusMiles)) mi", icon: "scope")
                     profileMetric(title: "Portfolio", value: "\(model.portfolio(for: groomer).count) looks", icon: "photo.stack.fill")
                 }
             }
@@ -184,6 +197,33 @@ struct GroomerProfileView: View {
             }
 
             taskCardActionButton
+
+            if taskActionIsDisabled, !taskMismatchReasons.isEmpty {
+                Button {
+                    showTaskMismatchInfo = true
+                } label: {
+                    Label("Why unavailable", systemImage: "info.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.coralDark)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showTaskMismatchInfo) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Not a fit for this task")
+                            .font(.headline.weight(.bold))
+                            .fontDesign(.rounded)
+                            .foregroundStyle(PetTheme.ink)
+                        ForEach(taskMismatchReasons, id: \.self) { reason in
+                            Label(reason, systemImage: "info.circle")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PetTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(14)
+                    .presentationCompactAdaptation(.popover)
+                }
+            }
         }
         .padding(12)
         .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -306,6 +346,9 @@ struct GroomerProfileView: View {
 
     private var taskActionTitle: String {
         guard model.currentGroomingTask != nil else { return "Create Task First" }
+        if !taskMismatchReasons.isEmpty {
+            return "Unavailable"
+        }
         switch currentTaskSubmission?.status {
         case .sent:
             return "Revoke Card"
@@ -320,6 +363,9 @@ struct GroomerProfileView: View {
 
     private var taskActionIcon: String {
         guard model.currentGroomingTask != nil else { return "doc.badge.plus" }
+        if !taskMismatchReasons.isEmpty {
+            return "slash.circle.fill"
+        }
         switch currentTaskSubmission?.status {
         case .sent:
             return "arrow.uturn.backward.circle.fill"
@@ -335,6 +381,9 @@ struct GroomerProfileView: View {
     private var taskActionHint: String {
         guard let task = model.currentGroomingTask else {
             return "Create a task card on Home before sending a request to this groomer."
+        }
+        if !taskMismatchReasons.isEmpty {
+            return "This profile has service settings that conflict with your current task card."
         }
         if let submission = currentTaskSubmission {
             switch submission.status {
@@ -355,7 +404,27 @@ struct GroomerProfileView: View {
 
     private var taskActionIsDisabled: Bool {
         guard model.currentGroomingTask != nil else { return true }
+        if !taskMismatchReasons.isEmpty { return true }
         return currentTaskSubmission?.status == .accepted || currentTaskSubmission?.status == .completed
+    }
+
+    private var taskMismatchReasons: [String] {
+        guard let task = model.currentGroomingTask else { return [] }
+        return model.taskMismatchReasons(for: task, groomer: groomer)
+    }
+
+    private var serviceLocationChips: [String] {
+        var values: [String] = []
+        if groomer.offersStudioService {
+            values.append("Studio drop-off")
+        }
+        if groomer.offersHouseCallService {
+            values.append("House calls within \(Int(groomer.mobileServiceRadiusMiles)) mi")
+        }
+        if values.isEmpty {
+            values.append("Service location not set")
+        }
+        return values
     }
 
     private var taskActionIsQuiet: Bool {
@@ -616,10 +685,10 @@ struct QuoteRequestView: View {
                             Text(pet.name).tag(index + 1)
                         }
                     }
-                    TextField("Service type", text: $serviceType)
-                    TextField("Preferred timing", text: $preferredTime)
-                    TextField("Contact preference", text: $contactPreference)
-                    TextField("Notes", text: $notes, axis: .vertical)
+                    LimitedTextField("Service type", text: $serviceType, limit: 50)
+                    LimitedTextField("Preferred timing", text: $preferredTime, limit: 60)
+                    LimitedTextField("Contact preference", text: $contactPreference, limit: 40)
+                    LimitedTextField("Notes", text: $notes, limit: 240, axis: .vertical)
                 }
             }
             .navigationTitle("Quote request")
@@ -675,9 +744,9 @@ struct WriteReviewView: View {
                         Text("Rating")
                     }
                     Text("\(rating, specifier: "%.1f") stars")
-                    TextField("Service type", text: $serviceType)
+                    LimitedTextField("Service type", text: $serviceType, limit: 50)
                     Toggle("Would rebook", isOn: $wouldRebook)
-                    TextField("Review text", text: $reviewText, axis: .vertical)
+                    LimitedTextField("Review text", text: $reviewText, limit: 500, axis: .vertical)
                 }
             }
             .navigationTitle("Write review")
@@ -723,7 +792,7 @@ struct ReportContentView: View {
                             Text(reason.rawValue).tag(reason)
                         }
                     }
-                    TextField("Details", text: $details, axis: .vertical)
+                    LimitedTextField("Details", text: $details, limit: 500, axis: .vertical)
                 }
             }
             .navigationTitle(title)

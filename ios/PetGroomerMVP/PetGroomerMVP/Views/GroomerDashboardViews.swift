@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 
 struct GroomerTodayView: View {
     @EnvironmentObject private var model: AppModel
@@ -10,7 +11,7 @@ struct GroomerTodayView: View {
                 if let groomer = model.managedGroomer {
                     ScreenTitle(
                         title: "Today",
-                        subtitle: "Manage your independent groomer profile, portfolio, inquiries, and reviews in the same app customers use."
+                        subtitle: "Review today’s work and recent task activity."
                     )
 
                     VStack(alignment: .leading, spacing: 14) {
@@ -87,6 +88,7 @@ struct GroomerTodayView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .groomerChatToolbar()
     }
 }
 
@@ -97,7 +99,7 @@ struct MyGroomerProfileView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ScreenTitle(title: "My profile", subtitle: "Edit the profile pet owners see in search and on your public page.")
+                ScreenTitle(title: "My profile", subtitle: "Edit the public card pet owners see.")
 
                 if let draft {
                     VStack(alignment: .leading, spacing: 12) {
@@ -118,6 +120,33 @@ struct MyGroomerProfileView: View {
                         HStack(spacing: 10) {
                             numberField("Min price", value: bindingDouble(\.priceMin))
                             numberField("Max price", value: bindingDouble(\.priceMax))
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Service location")
+                                .font(.headline.weight(.semibold))
+                                .fontDesign(.rounded)
+
+                            numberField("House-call radius (mi)", value: bindingDouble(\.mobileServiceRadiusMiles))
+
+                            Text("Studio address is optional. Adding it enables customer drop-off tasks.")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PetTheme.muted)
+
+                            TextField("Studio street", text: studioAddressBinding(\.streetLine1))
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Suite / unit", text: studioAddressBinding(\.streetLine2))
+                                .textFieldStyle(.roundedBorder)
+                            HStack(spacing: 10) {
+                                TextField("City", text: studioAddressBinding(\.city))
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("State", text: studioAddressBinding(\.state))
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 76)
+                            }
+                            TextField("ZIP code", text: studioAddressBinding(\.postalCode))
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
                         }
 
                         Toggle("Published", isOn: Binding(
@@ -181,6 +210,28 @@ struct MyGroomerProfileView: View {
         )
     }
 
+    private func studioAddressBinding(_ keyPath: WritableKeyPath<ProfileAddress, String>) -> Binding<String> {
+        Binding(
+            get: { draft?.studioAddress?[keyPath: keyPath] ?? "" },
+            set: { value in
+                var address = draft?.studioAddress ?? ProfileAddress(
+                    streetLine1: "",
+                    streetLine2: "",
+                    city: draft?.city ?? "",
+                    state: "CA",
+                    postalCode: draft?.zipCode ?? "",
+                    country: "United States"
+                )
+                address[keyPath: keyPath] = value
+                let requiredFieldsAreEmpty = address.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                    address.city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                    address.state.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                    address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                draft?.studioAddress = requiredFieldsAreEmpty ? nil : address
+            }
+        )
+    }
+
     private func numberField(_ title: String, value: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
@@ -211,18 +262,16 @@ struct MyGroomerProfileView: View {
 
 struct GroomerInboxView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showChatInbox = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ScreenTitle(title: "Inquiry inbox", subtitle: "Task cards and quote requests from pet owners appear here before a full booking calendar exists.")
+                ScreenTitle(title: "Inbox", subtitle: "Review new task cards from pet owners.")
 
                 if let groomer = model.managedGroomer {
-                    let requests = model.quoteRequests(for: groomer)
                     let taskSubmissions = model.taskSubmissions(for: groomer)
-                    if requests.isEmpty && taskSubmissions.isEmpty {
-                        EmptyState(title: "No inquiries yet", message: "Pet owners can send task cards or request quotes from your profile.", systemImage: "tray")
+                    if taskSubmissions.isEmpty {
+                        EmptyState(title: "No task cards yet", message: "Pet owners can send task cards from your profile.", systemImage: "tray")
                     }
 
                     if !taskSubmissions.isEmpty {
@@ -242,32 +291,6 @@ struct GroomerInboxView: View {
                             }
                         }
                     }
-
-                    if !requests.isEmpty {
-                        SectionHeader(title: "Quote forms")
-                        ForEach(requests) { request in
-                            VStack(alignment: .leading, spacing: 12) {
-                                QuoteRequestCard(request: request)
-                                HStack(spacing: 10) {
-                                    Button {
-                                        model.updateQuoteStatus(request, status: .viewed)
-                                    } label: {
-                                        Label("Mark viewed", systemImage: "eye.fill")
-                                    }
-                                    .buttonStyle(QuietButtonStyle())
-
-                                    Button {
-                                        model.updateQuoteStatus(request, status: .closed)
-                                    } label: {
-                                        Label("Close", systemImage: "checkmark.circle.fill")
-                                    }
-                                    .buttonStyle(QuietButtonStyle())
-                                }
-                            }
-                            .taskCard()
-                            .padding(.horizontal, 18)
-                        }
-                    }
                 } else {
                     EmptyState(title: "No groomer profile", message: "No inbox is available for this demo user.", systemImage: "tray")
                 }
@@ -275,18 +298,7 @@ struct GroomerInboxView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                ChatToolbarButton(
-                    hasConversations: !model.chatConversations(for: .groomer).isEmpty,
-                    action: { showChatInbox = true }
-                )
-            }
-        }
-        .sheet(isPresented: $showChatInbox) {
-            TaskChatInboxView(viewerRole: .groomer)
-                .environmentObject(model)
-        }
+        .groomerChatToolbar()
     }
 }
 
@@ -322,7 +334,7 @@ struct GroomerScheduleView: View {
             VStack(spacing: 16) {
                 ScreenTitle(
                     title: "Schedule",
-                    subtitle: "Accepted task cards are arranged by date and time so you can manage the workday inside the app."
+                    subtitle: "Manage accepted task cards by date and time."
                 )
 
                 if let groomer = model.managedGroomer {
@@ -388,6 +400,7 @@ struct GroomerScheduleView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .groomerChatToolbar()
     }
 
     private func taskCount(on date: Date, in submissions: [GroomingTaskSubmission]) -> Int {
@@ -567,6 +580,8 @@ struct ScheduledTaskTile: View {
 struct ScheduledTaskDetailView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showChat = false
+    @State private var showPetCard = false
+    @State private var contactCopyTarget: ContactCopyTarget?
 
     let submissionID: UUID
 
@@ -585,7 +600,7 @@ struct ScheduledTaskDetailView: View {
                 VStack(spacing: 16) {
                     ScreenTitle(
                         title: "Scheduled task",
-                        subtitle: "Manage this accepted task card, cancel the work if needed, or message the pet owner."
+                        subtitle: "Review the task, cancel if needed, or message the owner."
                     )
 
                     VStack(alignment: .leading, spacing: 13) {
@@ -604,31 +619,23 @@ struct ScheduledTaskDetailView: View {
                         }
 
                         detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
+                        detailRow("Grooming place", value: task.serviceLocation.shortTitle, icon: task.serviceLocation.iconName)
                         detailRow("Address", value: task.searchArea.locationTitle, icon: task.searchArea.addressSource.iconName)
-                        detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
-                        detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
-                        detailRow("Style goal", value: task.styleGoal, icon: "scissors")
-                        if !task.specialNotes.isEmpty {
-                            detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
-                        }
-                        StyleReferenceImageButton(slot: task.referenceImageSlot)
-                        detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
                         if let package = model.petProfilePackage(for: task.petProfileLink) {
-                            NavigationLink {
-                                PetProfilePackageDetailView(package: package)
-                                    .environmentObject(model)
+                            Button {
+                                showPetCard = true
                             } label: {
-                                PetProfileAccessRow(link: task.petProfileLink, photoCount: package.photoSnapshots.count)
+                                petCardAccessButton(package: package)
                             }
                             .buttonStyle(.plain)
                         } else {
-                            detailRow("Pet profile", value: task.petProfileLink.compactURL, icon: "doc.text.magnifyingglass")
+                            detailRow("Pet card", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
                         }
-                        detailRow("Inbox package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
-                        detailRow("Groomer card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
-                        if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
-                            detailRow("Order record", value: "\(order.status.label) · \(order.localStoreLink.storageScope.displayTitle)", icon: "doc.text.fill")
-                        }
+                        styleGoalRow(task)
+                        detailRow("Special note", value: task.specialNotes.isEmpty ? "None" : task.specialNotes, icon: "exclamationmark.bubble")
+                        contactRows
+                        detailRow("Task ID", value: task.sequenceCode, icon: "number")
+                        detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
                     }
                     .taskCard()
                     .padding(.horizontal, 18)
@@ -662,6 +669,30 @@ struct ScheduledTaskDetailView: View {
                             .environmentObject(model)
                     }
                 }
+                .fullScreenCover(isPresented: $showPetCard) {
+                    if let package = model.petProfilePackage(for: submission.taskSnapshot.petProfileLink) {
+                        ZStack {
+                            Color.black.opacity(0.26)
+                                .ignoresSafeArea()
+                                .onTapGesture { showPetCard = false }
+                            ReadOnlyPetCardOverlayView(package: package) {
+                                showPetCard = false
+                            }
+                            .padding(.horizontal, 18)
+                        }
+                        .presentationBackground(.clear)
+                    }
+                }
+                .alert(item: $contactCopyTarget) { target in
+                    Alert(
+                        title: Text(target.alertTitle),
+                        message: Text(target.value),
+                        primaryButton: .default(Text("Copy")) {
+                            UIPasteboard.general.string = target.value
+                        },
+                        secondaryButton: .cancel()
+                    )
+                }
             } else {
                 EmptyState(title: "Task not found", message: "This scheduled task card is no longer available.", systemImage: "calendar.badge.exclamationmark")
             }
@@ -685,6 +716,113 @@ struct ScheduledTaskDetailView: View {
                     .foregroundStyle(PetTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func styleGoalRow(_ task: GroomingTask) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "scissors")
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Style goal")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                HStack(alignment: .top, spacing: 10) {
+                    Text(task.styleGoal)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    StyleReferenceImageButton(slot: task.referenceImageSlot)
+                }
+            }
+        }
+    }
+
+    private var contactRows: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Customer contact")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                contactButton(title: "Phone", value: model.customerPersonalProfile.phone, icon: "phone.fill")
+                contactButton(title: "Email", value: model.customerPersonalProfile.email, icon: "envelope.fill")
+            }
+        }
+    }
+
+    private func contactButton(title: String, value: String, icon: String) -> some View {
+        Button {
+            contactCopyTarget = ContactCopyTarget(title: title, value: value)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.coral)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(PetTheme.muted)
+                    Text(value.isEmpty ? "Not provided" : value)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                Spacer()
+                Image(systemName: "doc.on.doc")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+            .padding(9)
+            .background(PetTheme.cream.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(value.isEmpty)
+        .opacity(value.isEmpty ? 0.58 : 1)
+    }
+
+    private func petCardAccessButton(package: PetProfilePackage) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pawprint.fill")
+                .foregroundStyle(PetTheme.coral)
+                .frame(width: 32, height: 32)
+                .background(PetTheme.apricot.opacity(0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Pet card")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text("\(package.petSnapshot.name) · \(package.petSnapshot.breed)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.84)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+        }
+        .padding(10)
+        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private struct ContactCopyTarget: Identifiable {
+        let title: String
+        let value: String
+
+        var id: String { title }
+
+        var alertTitle: String {
+            "Copy \(title.lowercased())?"
         }
     }
 
@@ -800,10 +938,10 @@ struct PetProfileAccessRow: View {
                 .foregroundStyle(PetTheme.sage)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Pet profile")
+                Text("Pet card")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(PetTheme.muted)
-                Text("Open full profile package")
+                Text("Open full pet card package")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(PetTheme.ink)
                 Text("\(photoCount) photos · \(link.compactURL)")
@@ -823,6 +961,8 @@ struct PetProfileAccessRow: View {
 struct GroomingTaskSubmissionDetailView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showChat = false
+    @State private var showPetCard = false
+    @State private var contactCopyTarget: ContactCopyTarget?
 
     let submissionID: UUID
 
@@ -836,54 +976,21 @@ struct GroomingTaskSubmissionDetailView: View {
                 let task = submission.taskSnapshot
                 VStack(spacing: 16) {
                     ScreenTitle(
-                        title: "Task card",
-                        subtitle: "Review the task details, message the owner, then accept or decline when the scope is clear."
+                        title: "Incoming task",
+                        subtitle: "Review the card, open the pet card, and reply to the owner."
                     )
 
-                    VStack(alignment: .leading, spacing: 13) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(task.sequenceCode)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(PetTheme.coralDark)
-                                Text(task.service.rawValue)
-                                    .font(.title2.weight(.bold))
-                                    .fontDesign(.rounded)
-                                    .foregroundStyle(PetTheme.ink)
-                            }
-                            Spacer()
-                            Chip(text: submission.status.label, color: statusChipColor(submission.status))
-                        }
+                    taskSummaryCard(task, submission: submission)
 
-                        detailRow("Pet", value: petDetail(task.petSnapshot), icon: "pawprint.fill")
-                        detailRow("Appointment", value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted)) · \(task.timeWindow.displayTitle)", icon: "calendar")
-                        detailRow("Address", value: task.searchArea.locationTitle, icon: task.searchArea.addressSource.iconName)
-                        detailRow("Search range", value: task.searchArea.rangeTitle, icon: "scope")
-                        detailRow("Style goal", value: task.styleGoal, icon: "scissors")
-                        if !task.specialNotes.isEmpty {
-                            detailRow("Notes", value: task.specialNotes, icon: "exclamationmark.bubble")
-                        }
-                        StyleReferenceImageButton(slot: task.referenceImageSlot)
-                        detailRow("Owner score", value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)", icon: "lock.shield")
-                        if let package = model.petProfilePackage(for: task.petProfileLink) {
-                            NavigationLink {
-                                PetProfilePackageDetailView(package: package)
-                                    .environmentObject(model)
-                            } label: {
-                                PetProfileAccessRow(link: task.petProfileLink, photoCount: package.photoSnapshots.count)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            detailRow("Pet profile", value: task.petProfileLink.compactURL, icon: "doc.text.magnifyingglass")
-                        }
-                        detailRow("Task card package", value: submission.groomerInboxLink.compactURL, icon: "tray.and.arrow.down.fill")
-                        detailRow("Groomer public card", value: submission.groomerCardLink.compactURL, icon: "person.text.rectangle")
-                        if let order = model.orderRecord(exchangeID: submission.exchangeID, for: .groomer) {
-                            detailRow("Order record", value: "\(order.status.label) · \(order.localStoreLink.storageScope.displayTitle)", icon: "doc.text.fill")
-                        }
-                    }
-                    .taskCard()
-                    .padding(.horizontal, 18)
+                    petCardSection(task)
+
+                    visitPlanSection(task)
+
+                    styleRequestSection(task)
+
+                    contactSection
+
+                    internalInfoSection(task)
 
                     HStack(spacing: 10) {
                         Button {
@@ -922,6 +1029,31 @@ struct GroomingTaskSubmissionDetailView: View {
                             .environmentObject(model)
                     }
                 }
+                .fullScreenCover(isPresented: $showPetCard) {
+                    if let package = model.petProfilePackage(for: submission.taskSnapshot.petProfileLink) {
+                        ZStack {
+                            Color.black.opacity(0.26)
+                                .ignoresSafeArea()
+                                .onTapGesture { showPetCard = false }
+                            ReadOnlyPetCardOverlayView(package: package) {
+                                showPetCard = false
+                            }
+                            .padding(.horizontal, 18)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        }
+                        .presentationBackground(.clear)
+                    }
+                }
+                .alert(item: $contactCopyTarget) { target in
+                    Alert(
+                        title: Text(target.alertTitle),
+                        message: Text(target.value),
+                        primaryButton: .default(Text("Copy")) {
+                            UIPasteboard.general.string = target.value
+                        },
+                        secondaryButton: .cancel()
+                    )
+                }
             } else {
                 EmptyState(title: "Task not found", message: "This task card is no longer available.", systemImage: "tray")
             }
@@ -931,11 +1063,208 @@ struct GroomingTaskSubmissionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func detailRow(_ title: String, value: String, icon: String) -> some View {
+    private func taskSummaryCard(_ task: GroomingTask, submission: GroomingTaskSubmission) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: serviceIconName(for: task.service))
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(PetTheme.coral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(task.service.rawValue)
+                        .font(.title2.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(2)
+                    Text("For \(task.petSnapshot.name)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                }
+
+                Spacer(minLength: 0)
+
+                Chip(text: submission.status.label, color: statusChipColor(submission.status))
+            }
+
+            HStack(spacing: 9) {
+                summaryPill(icon: "calendar", text: task.targetDate.formatted(date: .abbreviated, time: .omitted))
+                summaryPill(icon: "clock", text: task.timeWindow.displayTitle)
+            }
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.28)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.055), radius: 12, x: 0, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.76), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
+    private func summaryPill(icon: String, text: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(PetTheme.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.45), lineWidth: 1)
+            )
+    }
+
+    private func serviceIconName(for service: GroomingTaskService) -> String {
+        switch service {
+        case .bath: "drop.fill"
+        case .fullGroom: "sparkles"
+        case .haircut, .faceTrim, .sanitaryTrim: "scissors"
+        case .nailTrim: "pawprint.fill"
+        case .dematting: "comb.fill"
+        case .catGrooming: "cat.fill"
+        }
+    }
+
+    private func petCardSection(_ task: GroomingTask) -> some View {
+        detailSection(title: "Pet card", icon: "pawprint.fill") {
+            if let package = model.petProfilePackage(for: task.petProfileLink) {
+                Button {
+                    showPetCard = true
+                } label: {
+                    petCardAccessButton(package: package)
+                }
+                .buttonStyle(.plain)
+            } else {
+                fallbackPetCard(task.petSnapshot)
+            }
+        }
+    }
+
+    private func visitPlanSection(_ task: GroomingTask) -> some View {
+        detailSection(title: "Visit plan", icon: "calendar.badge.clock") {
+            HStack(spacing: 10) {
+                compactInfoTile(
+                    title: "Appointment",
+                    value: "\(task.targetDate.formatted(date: .abbreviated, time: .omitted))\n\(task.timeWindow.displayTitle)",
+                    icon: "calendar"
+                )
+                compactInfoTile(
+                    title: "Place",
+                    value: task.serviceLocation.shortTitle,
+                    icon: task.serviceLocation.iconName
+                )
+            }
+
+            fullInfoRow(
+                title: "Address",
+                value: task.searchArea.locationTitle,
+                icon: task.searchArea.addressSource.iconName
+            )
+        }
+    }
+
+    private func styleRequestSection(_ task: GroomingTask) -> some View {
+        detailSection(title: "Style request", icon: "scissors") {
+            HStack(alignment: .center, spacing: 10) {
+                Text(task.styleGoal)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                StyleReferenceImageButton(slot: task.referenceImageSlot)
+            }
+            .padding(10)
+            .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.46), lineWidth: 1)
+            )
+
+            fullInfoRow(
+                title: "Special note",
+                value: task.specialNotes.isEmpty ? "None" : task.specialNotes,
+                icon: "exclamationmark.bubble"
+            )
+        }
+    }
+
+    private var contactSection: some View {
+        detailSection(title: "Customer contact", icon: "person.crop.circle.badge.questionmark") {
+            contactButton(title: "Phone", value: model.customerPersonalProfile.phone, icon: "phone.fill")
+            contactButton(title: "Email", value: model.customerPersonalProfile.email, icon: "envelope.fill")
+        }
+    }
+
+    private func internalInfoSection(_ task: GroomingTask) -> some View {
+        detailSection(title: "Internal info", icon: "lock.shield") {
+            fullInfoRow(title: "Task ID", value: task.sequenceCode, icon: "number")
+            fullInfoRow(
+                title: "Owner score",
+                value: "\(task.ownerHiddenScore.displayValue) · \(task.ownerHiddenScore.source)",
+                icon: "lock.shield"
+            )
+        }
+    }
+
+    private func detailSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Label(title, systemImage: icon)
+                .font(.headline.weight(.bold))
+                .fontDesign(.rounded)
+                .foregroundStyle(PetTheme.ink)
+            content()
+        }
+        .taskCard()
+        .padding(.horizontal, 18)
+    }
+
+    private func compactInfoTile(title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.coral)
+                .frame(width: 26, height: 26)
+                .background(PetTheme.apricot.opacity(0.32), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.46), lineWidth: 1)
+        )
+    }
+
+    private func fullInfoRow(title: String, value: String, icon: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
+                .font(.caption.weight(.bold))
                 .foregroundStyle(PetTheme.sage)
-                .frame(width: 20)
+                .frame(width: 26, height: 26)
+                .background(PetTheme.mint.opacity(0.26), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.caption.weight(.bold))
@@ -945,6 +1274,88 @@ struct GroomingTaskSubmissionDetailView: View {
                     .foregroundStyle(PetTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.36), lineWidth: 1)
+        )
+    }
+
+    private func fallbackPetCard(_ pet: Pet) -> some View {
+        fullInfoRow(title: pet.name, value: petDetail(pet), icon: "pawprint.fill")
+    }
+
+    private func contactButton(title: String, value: String, icon: String) -> some View {
+        Button {
+            contactCopyTarget = ContactCopyTarget(title: title, value: value)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.coral)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(PetTheme.muted)
+                    Text(value.isEmpty ? "Not provided" : value)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                Spacer()
+                Image(systemName: "doc.on.doc")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+            .padding(9)
+            .background(PetTheme.cream.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(value.isEmpty)
+        .opacity(value.isEmpty ? 0.58 : 1)
+    }
+
+    private func petCardAccessButton(package: PetProfilePackage) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pawprint.fill")
+                .foregroundStyle(PetTheme.coral)
+                .frame(width: 32, height: 32)
+                .background(PetTheme.apricot.opacity(0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Pet card")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text("\(package.petSnapshot.name) · \(package.petSnapshot.breed)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.84)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+        }
+        .padding(10)
+        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private struct ContactCopyTarget: Identifiable {
+        let title: String
+        let value: String
+
+        var id: String { title }
+
+        var alertTitle: String {
+            "Copy \(title.lowercased())?"
         }
     }
 
@@ -992,6 +1403,9 @@ struct ChatToolbarButton: View {
             }
         }
         .accessibilityLabel("Open messages")
+        .transaction { transaction in
+            transaction.animation = nil
+        }
     }
 }
 
@@ -1176,7 +1590,7 @@ struct TaskChatView: View {
                 }
                 .accessibilityLabel("Upload photo from album")
 
-                TextField("Message", text: $draft, axis: .vertical)
+                LimitedTextField("Message", text: $draft, limit: 500, axis: .vertical)
                     .lineLimit(1...4)
                     .padding(11)
                     .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -1293,7 +1707,7 @@ struct GroomerPortfolioManagerView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ScreenTitle(title: "My portfolio", subtitle: "Add and maintain grooming looks that help customers decide whether your style fits their pet.")
+                ScreenTitle(title: "My portfolio", subtitle: "Manage looks customers see on your public card.")
 
                 if let groomer = model.managedGroomer {
                     Button {
@@ -1319,6 +1733,7 @@ struct GroomerPortfolioManagerView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .groomerChatToolbar()
         .sheet(isPresented: $showAddPortfolio) {
             if let groomer = model.managedGroomer {
                 AddPortfolioItemView(groomer: groomer)

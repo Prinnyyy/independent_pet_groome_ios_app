@@ -343,6 +343,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Pet Groomer";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pet Groomer uses the camera to add pet profile photos.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Pet Groomer uses your location to set the start point for a grooming task card.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pet Groomer saves style reference photos to your photo library when you choose Save to Photos.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Pet Groomer uses the photo library to add pet profile photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -371,6 +373,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Pet Groomer";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pet Groomer uses the camera to add pet profile photos.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Pet Groomer uses your location to set the start point for a grooming task card.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pet Groomer saves style reference photos to your photo library when you choose Save to Photos.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Pet Groomer uses the photo library to add pet profile photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

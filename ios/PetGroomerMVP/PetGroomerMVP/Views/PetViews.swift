@@ -5,37 +5,65 @@ import UIKit
 struct PetsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showNewPet = false
+    @State private var selectedPetForCard: Pet?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ScreenTitle(title: "Pet profiles", subtitle: "Build reusable grooming cards with coat, behavior, health notes, and photos.")
+        ZStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    ScreenTitle(title: "Pet cards", subtitle: "Keep each pet’s card ready for task cards and groomer review.")
 
-                Button {
-                    showNewPet = true
-                } label: {
-                    Label("Create pet profile", systemImage: "plus.circle.fill")
-                }
-                .buttonStyle(CoralButtonStyle())
-                .padding(.horizontal, 18)
+                    Button {
+                        showNewPet = true
+                    } label: {
+                        Label("Create Pet Card", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(CoralButtonStyle())
+                    .padding(.horizontal, 18)
 
-                if model.pets.isEmpty {
-                    EmptyState(title: "No pets yet", message: "Create a profile before requesting quotes.", systemImage: "pawprint")
-                } else {
-                    ForEach(model.pets) { pet in
-                        NavigationLink {
-                            PetDetailView(petID: pet.id)
-                        } label: {
-                            PetTaskCard(pet: pet, photoCount: model.photos(for: pet).count)
+                    if model.pets.isEmpty {
+                        EmptyState(title: "No pet cards yet", message: "Create a pet card before sending task cards.", systemImage: "pawprint")
+                    } else {
+                        ForEach(model.pets) { pet in
+                            Button {
+                                withAnimation(.smooth(duration: 0.22)) {
+                                    selectedPetForCard = pet
+                                }
+                            } label: {
+                                PetTaskCard(pet: pet, primaryPhoto: model.photos(for: pet).first)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 18)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
                     }
                 }
+                .padding(.bottom, 28)
             }
-            .padding(.bottom, 28)
+
+            if let selectedPetForCard {
+                Color.black.opacity(0.22)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.smooth(duration: 0.2)) {
+                            self.selectedPetForCard = nil
+                        }
+                    }
+                    .transition(.opacity)
+
+                PetCardOverlayView(petID: selectedPetForCard.id) {
+                    withAnimation(.smooth(duration: 0.2)) {
+                        self.selectedPetForCard = nil
+                    }
+                }
+                .environmentObject(model)
+                .padding(.horizontal, 22)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .center)))
+                .zIndex(2)
+            }
         }
         .appBackground()
+        .customerChatToolbar()
+        .animation(.smooth(duration: 0.22), value: selectedPetForCard?.id)
         .sheet(isPresented: $showNewPet) {
             PetEditorView(mode: .create)
                 .environmentObject(model)
@@ -43,25 +71,12 @@ struct PetsView: View {
     }
 }
 
-struct PetDetailView: View {
+struct PetCardOverlayView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var isEditing = false
-    @State private var name = ""
-    @State private var species: PetSpecies = .dog
-    @State private var breed = ""
-    @State private var weightPounds = 15
-    @State private var ageYears = 4
-    @State private var sexOption: PetSexOption = .notSpecified
-    @State private var temperamentText = ""
-    @State private var healthNotes = ""
-    @State private var showPhotoTypeMenu = false
-    @State private var showReplacePhotoAlert = false
-    @State private var showPhotoPicker = false
-    @State private var pendingPhotoType: PetPhotoType?
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showEditor = false
 
     let petID: UUID
+    let onClose: () -> Void
 
     private var pet: Pet? {
         model.pets.first { $0.id == petID }
@@ -70,240 +85,239 @@ struct PetDetailView: View {
     var body: some View {
         Group {
             if let pet {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        PetProfilePhotoCarousel(photos: model.photos(for: pet), species: pet.species)
-
-                        VStack(alignment: .leading, spacing: 18) {
-                            profileTitle(for: pet)
-
-                            if isEditing {
-                                editableProfileFields
-                            } else {
-                                PetProfileDetailPanel(pet: pet, photoCount: model.photos(for: pet).count)
-                            }
-
-                            bottomActions(for: pet)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.top, 18)
-                        .padding(.bottom, 30)
-                    }
-                }
-                .appBackground()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        if isEditing {
-                            Button("Cancel") {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
-                                    populateDraft(from: pet)
-                                    isEditing = false
-                                }
-                            }
-                        }
-                    }
-                }
-                .confirmationDialog("Add a pet photo", isPresented: $showPhotoTypeMenu, titleVisibility: .visible) {
-                    ForEach(PetPhotoType.allCases) { type in
-                        Button(type.rawValue) {
-                            preparePhotoUpload(type: type, for: pet)
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Choose the photo angle or purpose. Existing fixed-angle photos will be replaced.")
-                }
-                .alert(replacePhotoTitle, isPresented: $showReplacePhotoAlert) {
-                    Button("Replace photo", role: .destructive) {
-                        showPhotoPicker = true
-                    }
-                    Button("Cancel", role: .cancel) {
-                        pendingPhotoType = nil
-                    }
-                } message: {
-                    Text("This pet already has a \(pendingPhotoType?.rawValue.lowercased() ?? "selected") photo. Uploading a new one will replace it.")
-                }
-                .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
-                .onChange(of: selectedPhotoItem) { _, item in
-                    loadSelectedPhoto(item, for: pet)
-                }
-                .onAppear {
-                    populateDraft(from: pet)
-                }
+                petCard(for: pet)
             } else {
-                EmptyState(title: "Pet not found", message: "This profile may have been deleted.", systemImage: "exclamationmark.triangle")
+                EmptyState(title: "Pet card not found", message: "This pet card may have been deleted.", systemImage: "exclamationmark.triangle")
+                    .taskCard()
+            }
+        }
+        .sheet(isPresented: $showEditor) {
+            if let pet {
+                PetEditorView(mode: .edit(pet))
+                    .environmentObject(model)
             }
         }
     }
 
-    @ViewBuilder
-    private func profileTitle(for pet: Pet) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if isEditing {
-                HStack(alignment: .center, spacing: 12) {
-                    TextField("Pet name", text: $name)
-                        .font(.largeTitle.weight(.bold))
-                        .fontDesign(.rounded)
+    private func petCard(for pet: Pet) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(pet.name)
+                        .font(.system(size: 31, weight: .bold, design: .rounded))
                         .foregroundStyle(PetTheme.ink)
-                        .textFieldStyle(.plain)
-                        .padding(.vertical, 6)
-                        .overlay(alignment: .bottom) {
-                            Rectangle()
-                                .fill(PetTheme.line)
-                                .frame(height: 1)
-                        }
-
-                    Button {
-                        showPhotoTypeMenu = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(PetTheme.coral)
-                            .frame(width: 40, height: 40)
-                    }
-                    .background(PetTheme.apricot.opacity(0.34), in: Circle())
-                    .accessibilityLabel("Add photo")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Text([pet.species.rawValue, pet.breed].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
                 }
+                Spacer(minLength: 10)
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.muted)
+                        .frame(width: 32, height: 32)
+                        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
+            PetCardPhotoShowcase(photos: model.photos(for: pet), species: pet.species)
+                .frame(height: 220)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                PetCardMiniFact(title: "Gender", value: pet.sex?.nilIfEmpty ?? "Not set", icon: "person.fill.questionmark")
+                PetCardMiniFact(title: "Age", value: pet.age.map { "\(Int($0)) years" } ?? "Not set", icon: "calendar")
+                PetCardMiniFact(title: "Weight", value: pet.weight.map { "\(Int($0)) lb" } ?? "Not set", icon: "scalemass")
+                PetCardMiniFact(title: "Photos", value: "\(model.photos(for: pet).count)", icon: "photo.on.rectangle")
+            }
+
+            PetCardTextBlock(title: "Temperament", value: pet.temperament.isEmpty ? "Not set" : pet.temperament.joined(separator: " · "), icon: "heart.text.square.fill")
+            PetCardTextBlock(title: "Health notes", value: pet.healthNotes?.nilIfEmpty ?? "No special notes", icon: "cross.case.fill")
+
+            Button {
+                showEditor = true
+            } label: {
+                Label("Edit", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(CoralButtonStyle())
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.24)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 9)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(PetTheme.coral.opacity(0.18), lineWidth: 1.2)
+        )
+        .frame(maxWidth: 390)
+    }
+}
+
+struct ReadOnlyPetCardOverlayView: View {
+    let package: PetProfilePackage
+    let onClose: () -> Void
+
+    private var pet: Pet {
+        package.petSnapshot
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(pet.name)
+                        .font(.system(size: 31, weight: .bold, design: .rounded))
+                        .foregroundStyle(PetTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Text([pet.species.rawValue, pet.breed].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
+                }
+                Spacer(minLength: 10)
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.muted)
+                        .frame(width: 32, height: 32)
+                        .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
+            PetCardPhotoShowcase(photos: package.photoSnapshots, species: pet.species)
+                .frame(height: 220)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                PetCardMiniFact(title: "Gender", value: pet.sex?.nilIfEmpty ?? "Not set", icon: "person.fill.questionmark")
+                PetCardMiniFact(title: "Age", value: pet.age.map { "\(Int($0)) years" } ?? "Not set", icon: "calendar")
+                PetCardMiniFact(title: "Weight", value: pet.weight.map { "\(Int($0)) lb" } ?? "Not set", icon: "scalemass")
+                PetCardMiniFact(title: "Photos", value: "\(package.photoSnapshots.count)", icon: "photo.on.rectangle")
+            }
+
+            PetCardTextBlock(title: "Temperament", value: pet.temperament.isEmpty ? "Not set" : pet.temperament.joined(separator: " · "), icon: "heart.text.square.fill")
+            PetCardTextBlock(title: "Health notes", value: pet.healthNotes?.nilIfEmpty ?? "No special notes", icon: "cross.case.fill")
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.24)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 9)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(PetTheme.coral.opacity(0.18), lineWidth: 1.2)
+        )
+        .frame(maxWidth: 390)
+    }
+}
+
+private struct PetCardPhotoShowcase: View {
+    let photos: [PetPhoto]
+    let species: PetSpecies
+
+    var body: some View {
+        TabView {
+            if photos.isEmpty {
+                PetProfilePhotoPage(photo: nil, species: species)
             } else {
-                Text(pet.name)
-                    .font(.largeTitle.weight(.bold))
-                    .fontDesign(.rounded)
+                ForEach(photos) { photo in
+                    PetProfilePhotoPage(photo: photo, species: species)
+                }
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: photos.count > 1 ? .automatic : .never))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.78), lineWidth: 1)
+        )
+    }
+}
+
+private struct PetCardMiniFact: View {
+    let title: String
+    let value: String
+    let icon: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.coral)
+                .frame(width: 26, height: 26)
+                .background(PetTheme.apricot.opacity(0.28), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(PetTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
             }
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+        )
+    }
+}
 
-            HStack(spacing: 8) {
-                Chip(text: isEditing ? species.rawValue : pet.species.rawValue, color: PetTheme.mint)
-                let weightValue = isEditing ? Double(weightPounds) : pet.weight
-                if let weightValue {
-                    Chip(text: "\(Int(weightValue)) lb", color: PetTheme.sky)
-                }
-                Chip(text: "\(model.photos(for: pet).count) photos", color: PetTheme.apricot)
+private struct PetCardTextBlock: View {
+    let title: String
+    let value: String
+    let icon: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: icon)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 26, height: 26)
+                .background(PetTheme.mint.opacity(0.3), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+                Text(value)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(PetTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
         }
-    }
-
-    private var editableProfileFields: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            PetEditFieldGroup(title: "Basics") {
-                Picker("Species", selection: $species) {
-                    ForEach(PetSpecies.allCases) { species in
-                        Text(species.rawValue).tag(species)
-                    }
-                }
-                .pickerStyle(.segmented)
-                PetProfileMenuPicker(title: "Breed", value: $breed, options: breedOptions)
-                PetProfileIntPicker(title: "Weight", value: $weightPounds, options: weightOptions, suffix: "lb")
-                PetProfileIntPicker(title: "Age", value: $ageYears, options: ageOptions, suffix: "years")
-                PetProfileEnumPicker(title: "Sex", value: $sexOption)
-                PetProfileTextField(title: "Temperament tags", text: $temperamentText, axis: .vertical)
-                PetProfileTextField(title: "Health notes", text: $healthNotes, axis: .vertical)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func bottomActions(for pet: Pet) -> some View {
-        VStack(spacing: 10) {
-            if isEditing {
-                Button {
-                    saveDraft(original: pet)
-                } label: {
-                    Label("Save profile", systemImage: "checkmark.circle.fill")
-                }
-                .buttonStyle(CoralButtonStyle())
-
-                Button(role: .destructive) {
-                    model.deletePet(pet)
-                    dismiss()
-                } label: {
-                    Label("Delete pet profile", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(QuietButtonStyle())
-            } else {
-                Button {
-                    populateDraft(from: pet)
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
-                        isEditing = true
-                    }
-                } label: {
-                    Label("Edit profile", systemImage: "slider.horizontal.3")
-                }
-                .buttonStyle(CoralButtonStyle())
-            }
-        }
-    }
-
-    private var replacePhotoTitle: String {
-        "Replace \(pendingPhotoType?.rawValue ?? "photo")?"
-    }
-
-    private func populateDraft(from pet: Pet) {
-        name = pet.name
-        species = pet.species
-        breed = pet.breed
-        weightPounds = Int(pet.weight ?? 15)
-        ageYears = Int(pet.age ?? 4)
-        sexOption = PetSexOption(rawValue: pet.sex ?? "") ?? .notSpecified
-        temperamentText = pet.temperament.joined(separator: ", ")
-        healthNotes = pet.healthNotes ?? ""
-    }
-
-    private func saveDraft(original pet: Pet) {
-        var updated = pet
-        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.species = species
-        updated.breed = breed.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.weight = Double(weightPounds)
-        updated.age = Double(ageYears)
-        updated.sex = sexOption.profileValue
-        updated.temperament = temperamentText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        updated.healthNotes = healthNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        model.updatePet(updated)
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
-            isEditing = false
-        }
-    }
-
-    private func preparePhotoUpload(type: PetPhotoType, for pet: Pet) {
-        pendingPhotoType = type
-        let shouldReplace = type != .other && model.photos(for: pet).contains { $0.photoType == type }
-        if shouldReplace {
-            showReplacePhotoAlert = true
-        } else {
-            showPhotoPicker = true
-        }
-    }
-
-    private func loadSelectedPhoto(_ item: PhotosPickerItem?, for pet: Pet) {
-        guard let item, let pendingPhotoType else { return }
-        Task {
-            let data = try? await item.loadTransferable(type: Data.self)
-            await MainActor.run {
-                _ = model.savePetPhoto(to: pet, type: pendingPhotoType, imageData: data)
-                selectedPhotoItem = nil
-                self.pendingPhotoType = nil
-            }
-        }
-    }
-
-    private var breedOptions: [String] {
-        var options = PetProfileOptionSet.breeds(for: species)
-        if !breed.isEmpty && !options.contains(breed) {
-            options.insert(breed, at: 0)
-        }
-        return options
-    }
-
-    private var weightOptions: [Int] {
-        PetProfileOptionSet.weightPounds
-    }
-
-    private var ageOptions: [Int] {
-        PetProfileOptionSet.ageYears
+        .padding(10)
+        .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+        )
     }
 }
 
@@ -333,7 +347,7 @@ struct PetProfilePackageDetailView: View {
                     PetProfileDetailPanel(pet: package.petSnapshot, photoCount: package.photoSnapshots.count)
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Server profile package", systemImage: "link")
+                        Label("Server pet card package", systemImage: "link")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(PetTheme.coralDark)
                         Text(package.serverProfileLink.compactURL)
@@ -349,7 +363,7 @@ struct PetProfilePackageDetailView: View {
             }
         }
         .appBackground()
-        .navigationTitle("Pet profile")
+        .navigationTitle("Pet Card")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -379,8 +393,8 @@ private struct PetProfilePhotoPage: View {
     let species: PetSpecies
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if let data = photo?.imageData, let uiImage = UIImage(data: data) {
+        ZStack {
+            if let data = photo?.showcaseDisplayData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
@@ -393,20 +407,12 @@ private struct PetProfilePhotoPage: View {
                 VStack(spacing: 14) {
                     Image(systemName: species == .cat ? "cat.fill" : "dog.fill")
                         .font(.system(size: 74, weight: .semibold))
-                    Text(photo == nil ? "Add profile photos" : "Local photo")
+                    Text(photo == nil ? "Add pet card photos" : "Local photo")
                         .font(.headline.weight(.semibold))
                         .fontDesign(.rounded)
                 }
                 .foregroundStyle(.white.opacity(0.94))
             }
-
-            Text(photo?.photoType.rawValue ?? "No photo")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(PetTheme.ink)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.white.opacity(0.82), in: Capsule())
-                .padding(16)
         }
         .frame(maxWidth: .infinity)
         .clipped()
@@ -471,25 +477,10 @@ private struct PetProfileInfoRow: View {
     }
 }
 
-private struct PetEditFieldGroup<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline.weight(.semibold))
-                .fontDesign(.rounded)
-                .foregroundStyle(PetTheme.ink)
-            content
-        }
-        .taskCard()
-    }
-}
-
 private struct PetProfileTextField: View {
     let title: String
     @Binding var text: String
+    var limit: Int = 120
     var keyboard: UIKeyboardType = .default
     var axis: Axis = .horizontal
 
@@ -498,7 +489,7 @@ private struct PetProfileTextField: View {
             Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(PetTheme.muted)
-            TextField(title, text: $text, axis: axis)
+            LimitedTextField(title, text: $text, limit: limit, axis: axis)
                 .keyboardType(keyboard)
                 .textInputAutocapitalization(.words)
                 .padding(.horizontal, 12)
@@ -525,35 +516,6 @@ private struct PetProfileMenuPicker: View {
             Picker(title, selection: $value) {
                 ForEach(options, id: \.self) { option in
                     Text(option).tag(option)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(PetTheme.cream.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(PetTheme.line.opacity(0.85), lineWidth: 1)
-            )
-        }
-    }
-}
-
-private struct PetProfileIntPicker: View {
-    let title: String
-    @Binding var value: Int
-    let options: [Int]
-    let suffix: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(PetTheme.muted)
-            Picker(title, selection: $value) {
-                ForEach(options, id: \.self) { option in
-                    Text("\(option) \(suffix)").tag(option)
                 }
             }
             .pickerStyle(.menu)
@@ -620,9 +582,6 @@ private enum PetProfileOptionSet {
             ["Domestic shorthair", "Domestic longhair", "Persian", "Maine Coon", "Ragdoll", "British shorthair", "Siamese", "Mixed breed"]
         }
     }
-
-    static let weightPounds = Array(3...120)
-    static let ageYears = Array(0...25)
 }
 
 private extension String {
@@ -631,9 +590,206 @@ private extension String {
     }
 }
 
+private enum PetPhotoRenditionFactory {
+    static func makeRenditions(from data: Data) -> PetPhotoImageRenditions {
+        guard let image = UIImage(data: data) else {
+            return PetPhotoImageRenditions(originalData: data, squareThumbnailData: data, cardShowcaseData: data)
+        }
+
+        return PetPhotoImageRenditions(
+            originalData: data,
+            squareThumbnailData: centerCroppedJPEGData(from: image, targetSize: CGSize(width: 800, height: 800)),
+            cardShowcaseData: centerCroppedJPEGData(from: image, targetSize: CGSize(width: 1200, height: 760))
+        )
+    }
+
+    private static func centerCroppedJPEGData(from image: UIImage, targetSize: CGSize) -> Data? {
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return image.jpegData(compressionQuality: 0.86) }
+
+        let targetAspect = targetSize.width / targetSize.height
+        let sourceAspect = sourceSize.width / sourceSize.height
+        let cropSize: CGSize
+        if sourceAspect > targetAspect {
+            cropSize = CGSize(width: sourceSize.height * targetAspect, height: sourceSize.height)
+        } else {
+            cropSize = CGSize(width: sourceSize.width, height: sourceSize.width / targetAspect)
+        }
+
+        let cropOrigin = CGPoint(
+            x: (sourceSize.width - cropSize.width) / 2,
+            y: (sourceSize.height - cropSize.height) / 2
+        )
+        let cropRect = CGRect(origin: cropOrigin, size: cropSize)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let renderedImage = renderer.image { _ in
+            image.draw(in: CGRect(
+                x: -cropRect.origin.x * targetSize.width / cropRect.width,
+                y: -cropRect.origin.y * targetSize.height / cropRect.height,
+                width: sourceSize.width * targetSize.width / cropRect.width,
+                height: sourceSize.height * targetSize.height / cropRect.height
+            ))
+        }
+        return renderedImage.jpegData(compressionQuality: 0.86)
+    }
+}
+
 enum PetEditorMode {
     case create
     case edit(Pet)
+}
+
+private struct PetCardPhotoGridEditor: View {
+    let photos: [PetPhoto]
+    let species: PetSpecies
+    let onAddCamera: () -> Void
+    let onAddLibrary: () -> Void
+    let onReplaceCamera: (PetPhoto) -> Void
+    let onReplaceLibrary: (PetPhoto) -> Void
+    let onDelete: (PetPhoto) -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    private var visiblePhotos: [PetPhoto] { Array(photos.prefix(8)) }
+    private var shouldShowAddTile: Bool { visiblePhotos.count < 8 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Photos")
+                    .font(.headline.weight(.bold))
+                    .fontDesign(.rounded)
+                    .foregroundStyle(PetTheme.ink)
+                Spacer()
+                Text("\(visiblePhotos.count)/8")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(visiblePhotos) { photo in
+                    photoMenuTile(photo)
+                }
+
+                if shouldShowAddTile {
+                    addPhotoTile
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.2)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .shadow(color: .black.opacity(0.045), radius: 10, x: 0, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.62), lineWidth: 1)
+        )
+    }
+
+    private func photoMenuTile(_ photo: PetPhoto) -> some View {
+        Menu {
+            Button(role: .destructive) {
+                onDelete(photo)
+            } label: {
+                Label("Delete Photo", systemImage: "trash")
+            }
+
+            Menu {
+                Button {
+                    onReplaceCamera(photo)
+                } label: {
+                    Label("Take Photo", systemImage: "camera.fill")
+                }
+
+                Button {
+                    onReplaceLibrary(photo)
+                } label: {
+                    Label("Upload from Photos", systemImage: "photo.fill.on.rectangle.fill")
+                }
+            } label: {
+                Label("Replace Photo", systemImage: "arrow.triangle.2.circlepath.camera")
+            }
+        } label: {
+            PetCardPhotoGridTile(photo: photo, species: species)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit pet card photo")
+    }
+
+    private var addPhotoTile: some View {
+        Menu {
+            Button {
+                onAddCamera()
+            } label: {
+                Label("Take Photo", systemImage: "camera.fill")
+            }
+
+            Button {
+                onAddLibrary()
+            } label: {
+                Label("Upload from Photos", systemImage: "photo.fill.on.rectangle.fill")
+            }
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(PetTheme.apricot.opacity(0.25))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(PetTheme.coral.opacity(0.35), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                Image(systemName: "plus")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(PetTheme.coral)
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add pet card photo")
+    }
+}
+
+private struct PetCardPhotoGridTile: View {
+    let photo: PetPhoto
+    let species: PetSpecies
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                if let data = photo.squareDisplayData, let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                } else {
+                    LinearGradient(
+                        colors: [PetTheme.sky.opacity(0.72), PetTheme.mint.opacity(0.72), PetTheme.apricot.opacity(0.62)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Image(systemName: species == .cat ? "cat.fill" : "dog.fill")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .aspectRatio(1, contentMode: .fill)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(.white.opacity(0.72), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
 }
 
 struct PetEditorView: View {
@@ -644,21 +800,30 @@ struct PetEditorView: View {
     @State private var name: String
     @State private var species: PetSpecies
     @State private var breed: String
-    @State private var weightPounds: Int
-    @State private var ageYears: Int
+    @State private var weightText: String
+    @State private var ageText: String
     @State private var sexOption: PetSexOption
     @State private var temperamentText: String
     @State private var healthNotes: String
+    @State private var showPhotoPicker = false
+    @State private var showCameraPicker = false
+    @State private var showCameraUnavailableAlert = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var replacementPhotoID: UUID?
+    @State private var draftPhotos: [PetPhoto] = []
+    @State private var draftLoadedForPetID: UUID?
+    private let creationDraftPetID: UUID
 
     init(mode: PetEditorMode) {
         self.mode = mode
+        self.creationDraftPetID = UUID()
         switch mode {
         case .create:
             _name = State(initialValue: "")
             _species = State(initialValue: .dog)
             _breed = State(initialValue: "Maltipoo")
-            _weightPounds = State(initialValue: 15)
-            _ageYears = State(initialValue: 4)
+            _weightText = State(initialValue: "15")
+            _ageText = State(initialValue: "4")
             _sexOption = State(initialValue: .notSpecified)
             _temperamentText = State(initialValue: "")
             _healthNotes = State(initialValue: "")
@@ -666,8 +831,8 @@ struct PetEditorView: View {
             _name = State(initialValue: pet.name)
             _species = State(initialValue: pet.species)
             _breed = State(initialValue: pet.breed)
-            _weightPounds = State(initialValue: Int(pet.weight ?? 15))
-            _ageYears = State(initialValue: Int(pet.age ?? 4))
+            _weightText = State(initialValue: pet.weight.map { "\(Int($0))" } ?? "")
+            _ageText = State(initialValue: pet.age.map { "\(Int($0))" } ?? "")
             _sexOption = State(initialValue: PetSexOption(rawValue: pet.sex ?? "") ?? .notSpecified)
             _temperamentText = State(initialValue: pet.temperament.joined(separator: ", "))
             _healthNotes = State(initialValue: pet.healthNotes ?? "")
@@ -676,42 +841,69 @@ struct PetEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Basics") {
-                    TextField("Pet name", text: $name)
-                    Picker("Species", selection: $species) {
-                        ForEach(PetSpecies.allCases) { species in
-                            Text(species.rawValue).tag(species)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    PetCardPhotoGridEditor(
+                        photos: draftPhotos,
+                        species: species,
+                        onAddCamera: {
+                            replacementPhotoID = nil
+                            openCameraOrAlert()
+                        },
+                        onAddLibrary: {
+                            replacementPhotoID = nil
+                            showPhotoPicker = true
+                        },
+                        onReplaceCamera: { photo in
+                            replacementPhotoID = photo.id
+                            openCameraOrAlert()
+                        },
+                        onReplaceLibrary: { photo in
+                            replacementPhotoID = photo.id
+                            showPhotoPicker = true
+                        },
+                        onDelete: { photo in
+                            withAnimation(.smooth(duration: 0.18)) {
+                                draftPhotos.removeAll { $0.id == photo.id }
+                                normalizeDraftPhotoPrimaryState()
+                            }
                         }
-                    }
-                    Picker("Breed", selection: $breed) {
-                        ForEach(breedOptions, id: \.self) { option in
-                            Text(option).tag(option)
-                        }
-                    }
-                    Picker("Weight", selection: $weightPounds) {
-                        ForEach(PetProfileOptionSet.weightPounds, id: \.self) { option in
-                            Text("\(option) lb").tag(option)
-                        }
-                    }
-                    Picker("Age", selection: $ageYears) {
-                        ForEach(PetProfileOptionSet.ageYears, id: \.self) { option in
-                            Text("\(option) years").tag(option)
-                        }
-                    }
-                    Picker("Sex", selection: $sexOption) {
-                        ForEach(PetSexOption.allCases) { option in
-                            Text(option.displayTitle).tag(option)
-                        }
-                    }
-                }
+                    )
+                    .padding(.horizontal, 18)
 
-                Section("Profile notes") {
-                    TextField("Temperament tags", text: $temperamentText, axis: .vertical)
-                    TextField("Health notes", text: $healthNotes, axis: .vertical)
+                    VStack(alignment: .leading, spacing: 12) {
+                        petTextField("Name", text: $name)
+
+                        Picker("Species", selection: $species) {
+                            ForEach(PetSpecies.allCases) { species in
+                                Text(species.rawValue).tag(species)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        PetProfileMenuPicker(title: "Breed", value: $breed, options: breedOptions)
+                        PetProfileEnumPicker(title: "Sex", value: $sexOption)
+
+                        HStack(spacing: 10) {
+                            petNumberField("Weight", text: $weightText, suffix: "lb")
+                            petNumberField("Age", text: $ageText, suffix: "years")
+                        }
+                    }
+                    .taskCard()
+                    .padding(.horizontal, 18)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        PetProfileTextField(title: "Temperament tags", text: $temperamentText, limit: 120, axis: .vertical)
+                        PetProfileTextField(title: "Health notes", text: $healthNotes, limit: 240, axis: .vertical)
+                    }
+                    .taskCard()
+                    .padding(.horizontal, 18)
                 }
+                .padding(.vertical, 16)
             }
+            .appBackground()
             .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -721,19 +913,95 @@ struct PetEditorView: View {
                         .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || breed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+            .onChange(of: selectedPhotoItem) { _, item in
+                loadSelectedPhoto(item)
+            }
+            .sheet(isPresented: $showCameraPicker) {
+                CameraPhotoPicker { data in
+                    savePhotoData(data)
+                }
+                .ignoresSafeArea()
+            }
+            .alert("Camera unavailable", isPresented: $showCameraUnavailableAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("This simulator or device does not currently provide a camera. Please upload from Photos instead.")
+            }
             .onChange(of: species) { _, newSpecies in
                 let options = PetProfileOptionSet.breeds(for: newSpecies)
                 if !options.contains(breed), let first = options.first {
                     breed = first
                 }
             }
+            .onChange(of: weightText) { _, value in
+                weightText = boundedNumericText(value, max: 999)
+            }
+            .onChange(of: ageText) { _, value in
+                ageText = boundedNumericText(value, max: 99)
+            }
+            .onAppear {
+                loadDraftPhotosIfNeeded()
+            }
         }
+    }
+
+    private func petTextField(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            LimitedTextField(title, text: text, limit: 40)
+                .font(.subheadline.weight(.semibold))
+                .textInputAutocapitalization(.words)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(PetTheme.cream.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(PetTheme.line.opacity(0.85), lineWidth: 1)
+                )
+        }
+    }
+
+    private func petNumberField(_ title: String, text: Binding<String>, suffix: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            HStack(spacing: 6) {
+                LimitedTextField(title, text: text, limit: title == "Weight" ? 3 : 2)
+                    .keyboardType(.numberPad)
+                    .font(.subheadline.weight(.semibold))
+                Text(suffix)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(PetTheme.cream.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.85), lineWidth: 1)
+            )
+        }
+    }
+
+    private var editingPet: Pet? {
+        if case .edit(let pet) = mode {
+            return model.pets.first { $0.id == pet.id } ?? pet
+        }
+        return nil
+    }
+
+    private var draftPhotoPetID: UUID {
+        editingPet?.id ?? creationDraftPetID
     }
 
     private var title: String {
         switch mode {
-        case .create: "Create pet"
-        case .edit: "Edit pet"
+        case .create: "Create Pet Card"
+        case .edit: "Edit Pet Card"
         }
     }
 
@@ -744,29 +1012,115 @@ struct PetEditorView: View {
             .filter { !$0.isEmpty }
         switch mode {
         case .create:
-            model.addPet(
+            let newPet = model.addPet(
                 name: name,
                 species: species,
                 breed: breed,
-                weight: Double(weightPounds),
-                age: Double(ageYears),
+                weight: Double(boundedInt(weightText, max: 999)),
+                age: Double(boundedInt(ageText, max: 99)),
                 sex: sexOption.profileValue,
                 temperament: temperament,
                 healthNotes: healthNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             )
+            model.setPetPhotos(for: newPet, photos: draftPhotos)
         case .edit(let original):
             var updated = original
             updated.name = name
             updated.species = species
             updated.breed = breed
-            updated.weight = Double(weightPounds)
-            updated.age = Double(ageYears)
+            updated.weight = Double(boundedInt(weightText, max: 999))
+            updated.age = Double(boundedInt(ageText, max: 99))
             updated.sex = sexOption.profileValue
             updated.temperament = temperament
             updated.healthNotes = healthNotes.isEmpty ? nil : healthNotes
             model.updatePet(updated)
+            model.setPetPhotos(for: updated, photos: draftPhotos)
         }
         dismiss()
+    }
+
+    private func loadSelectedPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            let data = try? await item.loadTransferable(type: Data.self)
+            await MainActor.run {
+                savePhotoData(data)
+                selectedPhotoItem = nil
+            }
+        }
+    }
+
+    private func openCameraOrAlert() {
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            showCameraPicker = true
+        } else {
+            showCameraUnavailableAlert = true
+        }
+    }
+
+    private func savePhotoData(_ data: Data?) {
+        guard let data else {
+            replacementPhotoID = nil
+            return
+        }
+        let renditions = PetPhotoRenditionFactory.makeRenditions(from: data)
+        withAnimation(.smooth(duration: 0.18)) {
+            if let replacementPhotoID {
+                if let index = draftPhotos.firstIndex(where: { $0.id == replacementPhotoID }) {
+                    draftPhotos[index].imageURL = "local://pet-photo-\(UUID().uuidString)"
+                    draftPhotos[index].imageData = data
+                    draftPhotos[index].imageRenditions = renditions
+                    draftPhotos[index].createdAt = Date()
+                }
+                self.replacementPhotoID = nil
+            } else if draftPhotos.count < 8 {
+                draftPhotos.append(
+                    PetPhoto(
+                        id: UUID(),
+                        petID: draftPhotoPetID,
+                        userID: model.currentUser.id,
+                        imageURL: "local://pet-photo-\(UUID().uuidString)",
+                        photoType: .petCard,
+                        isPrimary: draftPhotos.isEmpty,
+                        createdAt: Date(),
+                        imageData: data,
+                        imageRenditions: renditions
+                    )
+                )
+            }
+            normalizeDraftPhotoPrimaryState()
+        }
+    }
+
+    private func loadDraftPhotosIfNeeded() {
+        let petID = draftPhotoPetID
+        guard draftLoadedForPetID != petID else { return }
+        if let editingPet {
+            draftPhotos = Array(model.photos(for: editingPet).prefix(8))
+        } else {
+            draftPhotos = []
+        }
+        normalizeDraftPhotoPrimaryState()
+        draftLoadedForPetID = petID
+    }
+
+    private func normalizeDraftPhotoPrimaryState() {
+        draftPhotos = draftPhotos.prefix(8).enumerated().map { index, photo in
+            var normalizedPhoto = photo
+            normalizedPhoto.photoType = .petCard
+            normalizedPhoto.isPrimary = index == 0
+            return normalizedPhoto
+        }
+    }
+
+    private func boundedNumericText(_ value: String, max: Int) -> String {
+        let digits = value.filter(\.isNumber)
+        guard let number = Int(digits) else { return "" }
+        return "\(min(number, max))"
+    }
+
+    private func boundedInt(_ value: String, max: Int) -> Int {
+        min(Int(value.filter(\.isNumber)) ?? 0, max)
     }
 
     private var breedOptions: [String] {

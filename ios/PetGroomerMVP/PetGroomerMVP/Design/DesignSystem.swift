@@ -82,19 +82,38 @@ struct ScreenTitle: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.largeTitle.weight(.bold))
+                .font(.system(size: 30, weight: .bold, design: .rounded))
                 .fontDesign(.rounded)
                 .foregroundStyle(PetTheme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
             Text(subtitle)
-                .font(.subheadline)
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(PetTheme.muted)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [PetTheme.porcelain, PetTheme.apricot.opacity(0.44)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.045), radius: 10, x: 0, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.78), lineWidth: 1)
+        )
         .padding(.horizontal, 18)
-        .padding(.top, 12)
+        .padding(.top, 8)
     }
 }
 

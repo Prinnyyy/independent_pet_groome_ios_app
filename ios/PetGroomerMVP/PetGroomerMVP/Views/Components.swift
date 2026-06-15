@@ -1,4 +1,68 @@
 import SwiftUI
+import UIKit
+
+struct LimitedTextField: View {
+    let placeholder: String
+    @Binding var text: String
+    let limit: Int
+    var axis: Axis = .horizontal
+
+    @State private var limitFeedback = false
+    @State private var shakeTrigger = 0
+
+    init(_ placeholder: String, text: Binding<String>, limit: Int, axis: Axis = .horizontal) {
+        self.placeholder = placeholder
+        self._text = text
+        self.limit = limit
+        self.axis = axis
+    }
+
+    var body: some View {
+        TextField(placeholder, text: limitedBinding, axis: axis)
+            .tint(limitFeedback ? PetTheme.coral : PetTheme.sage)
+            .modifier(LimitShakeEffect(trigger: shakeTrigger))
+            .animation(.smooth(duration: 0.16), value: limitFeedback)
+    }
+
+    private var limitedBinding: Binding<String> {
+        Binding(
+            get: { text },
+            set: { newValue in
+                guard newValue.count <= limit else {
+                    if text.count < limit {
+                        text = String(newValue.prefix(limit))
+                    }
+                    triggerLimitFeedback()
+                    return
+                }
+                text = newValue
+            }
+        )
+    }
+
+    private func triggerLimitFeedback() {
+        withAnimation(.linear(duration: 0.18)) {
+            shakeTrigger += 1
+        }
+        limitFeedback = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            limitFeedback = false
+        }
+    }
+}
+
+private struct LimitShakeEffect: GeometryEffect {
+    var trigger: Int
+    var animatableData: CGFloat {
+        get { CGFloat(trigger) }
+        set { trigger = Int(newValue) }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let translation = sin(animatableData * .pi * 3) * 4
+        return ProjectionTransform(CGAffineTransform(translationX: translation, y: 0))
+    }
+}
 
 struct MockPhotoBlock: View {
     let title: String
@@ -32,6 +96,8 @@ struct MockPhotoBlock: View {
 }
 
 struct GroomerCard: View {
+    @State private var showContactMismatchInfo = false
+
     let groomer: Groomer
     let portfolio: [PortfolioItem]
     let isSaved: Bool
@@ -40,6 +106,7 @@ struct GroomerCard: View {
     var contactTitle: String = "Contact groomer"
     var contactIcon: String = "paperplane.fill"
     var isContactDisabled: Bool = false
+    var contactMismatchReasons: [String] = []
     var secondaryTitle: String?
     var secondaryIcon: String = "person.text.rectangle"
     var onSecondaryAction: (() -> Void)?
@@ -103,13 +170,46 @@ struct GroomerCard: View {
             portfolioRail
 
             HStack(spacing: 9) {
-                Button(action: onContact) {
-                    actionLabel(title: contactTitle, icon: contactIcon)
-                        .frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    Button(action: onContact) {
+                        actionLabel(title: contactTitle, icon: contactIcon)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(CoralButtonStyle())
+                    .disabled(isContactDisabled)
+                    .opacity(isContactDisabled ? 0.58 : 1)
+
+                    if !contactMismatchReasons.isEmpty {
+                        Button {
+                            showContactMismatchInfo = true
+                        } label: {
+                            Image(systemName: "info.circle.fill")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(PetTheme.coralDark)
+                                .frame(width: 34, height: 34)
+                                .background(PetTheme.apricot.opacity(0.24), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Why this groomer does not match")
+                        .popover(isPresented: $showContactMismatchInfo) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Not a fit for this task")
+                                    .font(.headline.weight(.bold))
+                                    .fontDesign(.rounded)
+                                    .foregroundStyle(PetTheme.ink)
+                                ForEach(contactMismatchReasons, id: \.self) { reason in
+                                    Label(reason, systemImage: "info.circle")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(PetTheme.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(14)
+                            .presentationCompactAdaptation(.popover)
+                        }
+                    }
                 }
-                .buttonStyle(CoralButtonStyle())
-                .disabled(isContactDisabled)
-                .opacity(isContactDisabled ? 0.58 : 1)
+                .frame(maxWidth: .infinity)
 
                 if let secondaryTitle, let onSecondaryAction {
                     Button(action: onSecondaryAction) {
@@ -221,11 +321,11 @@ struct GroomerCard: View {
 
 struct PetTaskCard: View {
     let pet: Pet
-    let photoCount: Int
+    let primaryPhoto: PetPhoto?
 
     var body: some View {
         HStack(spacing: 12) {
-            MockPhotoBlock(title: pet.species.rawValue, systemImage: pet.species == .cat ? "cat.fill" : "dog.fill", height: 72)
+            PetTaskAvatar(photo: primaryPhoto, species: pet.species)
                 .frame(width: 72)
             VStack(alignment: .leading, spacing: 5) {
                 Text(pet.name)
@@ -236,8 +336,13 @@ struct PetTaskCard: View {
                     .font(.subheadline)
                     .foregroundStyle(PetTheme.muted)
                     .lineLimit(2)
-                HStack {
-                    Label("\(photoCount) photos", systemImage: "photo.on.rectangle")
+                HStack(spacing: 7) {
+                    if let sex = pet.sex, !sex.isEmpty {
+                        Label(sex, systemImage: "person.fill.questionmark")
+                    }
+                    if let age = pet.age {
+                        Label("\(Int(age)) yrs", systemImage: "calendar")
+                    }
                     if let weight = pet.weight {
                         Label("\(Int(weight)) lb", systemImage: "scalemass")
                     }
@@ -250,6 +355,32 @@ struct PetTaskCard: View {
                 .foregroundStyle(PetTheme.muted)
         }
         .taskCard()
+    }
+}
+
+private struct PetTaskAvatar: View {
+    let photo: PetPhoto?
+    let species: PetSpecies
+
+    var body: some View {
+        ZStack {
+            if let data = photo?.squareDisplayData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                LinearGradient(
+                    colors: [PetTheme.apricot.opacity(0.72), PetTheme.mint.opacity(0.76), PetTheme.sky.opacity(0.7)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Image(systemName: species == .cat ? "cat.fill" : "dog.fill")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -306,5 +437,44 @@ struct EmptyState: View {
         .frame(maxWidth: .infinity)
         .taskCard()
         .padding(.horizontal, 18)
+    }
+}
+
+struct CameraPhotoPicker: UIViewControllerRepresentable {
+    let onImageData: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPhotoPicker
+
+        init(parent: CameraPhotoPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage,
+               let data = image.jpegData(compressionQuality: 0.86) {
+                parent.onImageData(data)
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }

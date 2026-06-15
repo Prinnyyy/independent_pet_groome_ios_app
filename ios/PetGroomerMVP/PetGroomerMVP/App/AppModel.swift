@@ -24,6 +24,9 @@ final class AppModel: ObservableObject {
     @Published var petProfilePackages: [PetProfilePackage]
     @Published var taskChatMessages: [TaskChatMessage]
     @Published var currentGroomingTask: GroomingTask?
+    @Published var temporaryGroomingTaskContainer: TemporaryGroomingTaskContainer
+    @Published var selectedAppTab: String
+    @Published var shouldReturnToSearchAfterTaskCreation: Bool
 
     private let authRepository: AuthRepository
     private let petRepository: PetRepository
@@ -33,6 +36,7 @@ final class AppModel: ObservableObject {
     private let contactRepository: ContactRepository
     private let reportRepository: ReportRepository
     let aiService: AIService
+    private static let temporaryGroomingTaskContainerKey = "petgroomer.temporaryGroomingTaskContainer.v1"
 
     init(
         authRepository: AuthRepository = MockAuthRepository(),
@@ -52,6 +56,7 @@ final class AppModel: ObservableObject {
         self.contactRepository = contactRepository
         self.reportRepository = reportRepository
         self.aiService = aiService
+        let restoredTemporaryTaskContainer = Self.loadTemporaryGroomingTaskContainer()
 
         self.activeRole = .petOwner
         self.currentUser = MockData.currentUser
@@ -89,7 +94,10 @@ final class AppModel: ObservableObject {
         self.groomerOrderRecords = []
         self.petProfilePackages = []
         self.taskChatMessages = []
-        self.currentGroomingTask = nil
+        self.currentGroomingTask = restoredTemporaryTaskContainer.state == .completed ? restoredTemporaryTaskContainer.completedTask : nil
+        self.temporaryGroomingTaskContainer = restoredTemporaryTaskContainer
+        self.selectedAppTab = "home"
+        self.shouldReturnToSearchAfterTaskCreation = false
         refreshAllPetProfilePackages()
     }
 
@@ -172,17 +180,20 @@ final class AppModel: ObservableObject {
         pets.first { $0.id == task.petID } ?? task.petSnapshot
     }
 
+    @discardableResult
     func saveGroomingTask(
         pet: Pet,
         service: GroomingTaskService,
         targetDate: Date,
         timeWindow: GroomingTaskTimeWindow,
+        serviceLocation: GroomingTaskServiceLocation,
         searchArea: GroomingTaskSearchArea,
         styleGoal: String,
         specialNotes: String,
         styleReferenceSource: GroomingTaskStyleReferenceSource?,
-        styleReferenceImageData: Data?
-    ) {
+        styleReferenceImageData: Data?,
+        styleReferenceImageRenditions: GroomingTaskReferenceImageRenditions? = nil
+    ) -> GroomingTask {
         let sequenceCode = Self.makeTaskSequenceCode()
         let taskID = UUID()
         let now = Date()
@@ -209,21 +220,57 @@ final class AppModel: ObservableObject {
             service: service,
             targetDate: targetDate,
             timeWindow: timeWindow,
+            serviceLocation: serviceLocation,
             searchArea: searchArea,
             styleGoal: styleGoal,
             specialNotes: specialNotes,
             styleReferenceSource: styleReferenceSource,
             localPackageLink: localPackageLink,
-            referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(source: styleReferenceSource, sequenceCode: sequenceCode, imageData: styleReferenceImageData),
+            referenceImageSlot: GroomingTaskReferenceImageSlot.reserved(
+                source: styleReferenceSource,
+                sequenceCode: sequenceCode,
+                imageData: styleReferenceImageData,
+                imageRenditions: styleReferenceImageRenditions
+            ),
             ownerHiddenScore: ownerHiddenScore(for: currentUser.id),
             createdAt: now
         )
         currentGroomingTask = task
-        groomingTasks.insert(task, at: 0)
+        saveTemporaryGroomingTaskContainer(
+            TemporaryGroomingTaskContainer(
+                state: .completed,
+                petID: pet.id,
+                service: service,
+                targetDate: targetDate,
+                timeWindow: timeWindow,
+                serviceLocation: serviceLocation,
+                searchArea: searchArea,
+                styleGoal: styleGoal,
+                specialNotes: specialNotes,
+                styleReferenceSource: styleReferenceSource,
+                styleReferenceImageData: styleReferenceImageData,
+                styleReferenceImageRenditions: styleReferenceImageRenditions,
+                completedTask: task,
+                updatedAt: now
+            )
+        )
+        return task
     }
 
     func cancelGroomingTask() {
         currentGroomingTask = nil
+        clearTemporaryGroomingTaskContainer()
+    }
+
+    func saveTemporaryGroomingTaskContainer(_ container: TemporaryGroomingTaskContainer) {
+        temporaryGroomingTaskContainer = container
+        guard let data = try? JSONEncoder().encode(container) else { return }
+        UserDefaults.standard.set(data, forKey: Self.temporaryGroomingTaskContainerKey)
+    }
+
+    func clearTemporaryGroomingTaskContainer() {
+        temporaryGroomingTaskContainer = .empty()
+        UserDefaults.standard.removeObject(forKey: Self.temporaryGroomingTaskContainerKey)
     }
 
     func groomingTask(sequenceCode: String) -> GroomingTask? {
@@ -298,6 +345,10 @@ final class AppModel: ObservableObject {
         if let existing = pendingTaskSubmission(for: task, groomer: groomer) {
             return existing
         }
+        guard taskMismatchReasons(for: task, groomer: groomer).isEmpty else { return nil }
+        if !groomingTasks.contains(where: { $0.id == task.id }) {
+            groomingTasks.insert(task, at: 0)
+        }
 
         let exchangeID = UUID()
         let submissionID = UUID()
@@ -359,6 +410,7 @@ final class AppModel: ObservableObject {
         customerOrderRecords.insert(customerOrderRecord, at: 0)
         groomerOrderRecords.insert(groomerOrderRecord, at: 0)
         logContact(groomer: groomer, pet: task.petSnapshot, method: .quoteRequest)
+        clearTemporaryGroomingTaskContainer()
         return submission
     }
 
@@ -412,6 +464,25 @@ final class AppModel: ObservableObject {
             .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
+    func hasUnreadMessages(for viewerRole: AppRole) -> Bool {
+        let visibleSubmissionIDs = Set(
+            groomingTaskSubmissions
+                .filter { submission in
+                    switch viewerRole {
+                    case .petOwner:
+                        submission.userID == currentUser.id
+                    case .groomer:
+                        submission.groomerID == managedGroomerID
+                    }
+                }
+                .map(\.id)
+        )
+
+        return taskChatMessages.contains { message in
+            visibleSubmissionIDs.contains(message.submissionID) && message.senderRole != viewerRole
+        }
+    }
+
     func sendTaskMessage(submissionID: UUID, senderRole: AppRole, body: String, imageURL: String? = nil) {
         let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty || imageURL != nil else { return }
@@ -460,21 +531,27 @@ final class AppModel: ObservableObject {
             petID: task.petID,
             service: task.service,
             timeWindow: task.timeWindow,
+            serviceLocation: task.serviceLocation,
             searchArea: task.searchArea,
             styleGoal: task.styleGoal,
             specialNotes: task.specialNotes,
             styleReferenceSource: task.styleReferenceSource,
+            styleReferenceImageData: task.referenceImageSlot.imageData,
+            styleReferenceImageRenditions: task.referenceImageSlot.imageRenditions,
             createdAt: Date()
         )
 
         savedGroomingTaskTemplates.removeAll { existing in
-            existing.petID == template.petID &&
+                existing.petID == template.petID &&
                 existing.service == template.service &&
                 existing.timeWindow == template.timeWindow &&
+                existing.serviceLocation == template.serviceLocation &&
                 existing.searchArea == template.searchArea &&
                 existing.styleGoal == template.styleGoal &&
                 existing.specialNotes == template.specialNotes &&
-                existing.styleReferenceSource == template.styleReferenceSource
+                existing.styleReferenceSource == template.styleReferenceSource &&
+                existing.styleReferenceImageData == template.styleReferenceImageData &&
+                existing.styleReferenceImageRenditions == template.styleReferenceImageRenditions
         }
         savedGroomingTaskTemplates.insert(template, at: 0)
         return template
@@ -485,14 +562,58 @@ final class AppModel: ObservableObject {
 
         return groomers
             .filter { groomer in
-                guard groomer.status == .published else { return false }
-                let speciesMatch = pet.species == .cat ? groomer.acceptsCats : groomer.acceptsDogs
-                let sizeMatch = pet.species == .cat || acceptedSize(for: pet).map { groomer.sizeAccepted.contains($0) } ?? true
-                return speciesMatch && sizeMatch && locationMatches(groomer: groomer, searchArea: task.searchArea)
+                taskMismatchReasons(for: task, groomer: groomer).isEmpty
             }
             .sorted { lhs, rhs in
                 recommendationScore(groomer: lhs, pet: pet, task: task) > recommendationScore(groomer: rhs, pet: pet, task: task)
             }
+    }
+
+    func taskMismatchReasons(for task: GroomingTask, groomer: Groomer) -> [String] {
+        var reasons: [String] = []
+        let pet = task.petSnapshot
+        let distance = estimatedDistanceMiles(from: task.searchArea, to: groomer)
+
+        if groomer.status != .published {
+            reasons.append("Profile is not accepting public requests")
+        }
+
+        if pet.species == .cat && !groomer.acceptsCats {
+            reasons.append("Does not accept cats")
+        }
+        if pet.species == .dog && !groomer.acceptsDogs {
+            reasons.append("Does not accept dogs")
+        }
+
+        if pet.species == .dog, let size = acceptedSize(for: pet), !groomer.sizeAccepted.contains(size) {
+            reasons.append("Does not accept \(size.lowercased()) dogs")
+        }
+
+        if !serviceMatches(groomer: groomer, service: task.service) {
+            reasons.append("Does not offer \(task.service.rawValue.lowercased())")
+        }
+
+        if !groomer.availableTimeWindows.contains(task.timeWindow) {
+            reasons.append("Time window is not available")
+        }
+
+        switch task.serviceLocation {
+        case .atCustomerAddress:
+            if !groomer.offersHouseCallService {
+                reasons.append("Does not offer house-call grooming")
+            } else if distance > groomer.mobileServiceRadiusMiles {
+                reasons.append("Outside house-call range (\(Int(groomer.mobileServiceRadiusMiles)) mi max)")
+            }
+            if distance > Double(task.searchArea.radiusMiles) {
+                reasons.append("Outside your selected search range")
+            }
+        case .atGroomerStudio:
+            if !groomer.offersStudioService {
+                reasons.append("No studio address for drop-off appointments")
+            }
+        }
+
+        return reasons
     }
 
     private func acceptedSize(for pet: Pet) -> String? {
@@ -527,7 +648,7 @@ final class AppModel: ObservableObject {
 
         if groomer.city == task.searchArea.city || groomer.serviceAreas.contains(task.searchArea.city) {
             score += 3
-        } else if task.searchArea.radiusMiles >= 25 {
+        } else if estimatedDistanceMiles(from: task.searchArea, to: groomer) <= Double(task.searchArea.radiusMiles) {
             score += 0.8
         }
         if groomer.isVerified {
@@ -548,8 +669,31 @@ final class AppModel: ObservableObject {
         if !task.specialNotes.isEmpty {
             score += 0.2
         }
+        switch task.serviceLocation {
+        case .atCustomerAddress where groomer.offersHouseCallService:
+            score += 0.8
+        case .atGroomerStudio where groomer.offersStudioService:
+            score += 0.8
+        default:
+            break
+        }
 
         return score
+    }
+
+    func estimatedDistanceMiles(from searchArea: GroomingTaskSearchArea, to groomer: Groomer) -> Double {
+        let taskCity = searchArea.city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let taskZip = searchArea.zipCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !taskCity.isEmpty && taskCity == groomer.city {
+            return 4
+        }
+        if !taskCity.isEmpty && groomer.serviceAreas.contains(taskCity) {
+            return 9
+        }
+        if !taskZip.isEmpty && !groomer.zipCode.isEmpty && taskZip.prefix(3) == groomer.zipCode.prefix(3) {
+            return 12
+        }
+        return 35
     }
 
     private func locationMatches(groomer: Groomer, searchArea: GroomingTaskSearchArea) -> Bool {
@@ -575,6 +719,7 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
     func addPet(
         name: String,
         species: PetSpecies,
@@ -584,7 +729,7 @@ final class AppModel: ObservableObject {
         sex: String?,
         temperament: [String],
         healthNotes: String?
-    ) {
+    ) -> Pet {
         let pet = Pet(
             id: UUID(),
             userID: currentUser.id,
@@ -612,6 +757,7 @@ final class AppModel: ObservableObject {
         )
         pets.insert(pet, at: 0)
         refreshPetProfilePackage(for: pet)
+        return pet
     }
 
     func updatePet(_ pet: Pet) {
@@ -639,22 +785,14 @@ final class AppModel: ObservableObject {
             isPrimary: photos(for: pet).isEmpty,
             createdAt: Date()
         )
-        petPhotos.insert(photo, at: 0)
+        petPhotos.append(photo)
         refreshPetProfilePackage(for: pet)
         return true
     }
 
     @discardableResult
-    func savePetPhoto(to pet: Pet, type: PetPhotoType, imageData: Data?) -> Bool {
-        let replacesExistingSlot = type != .other
-        if replacesExistingSlot, let index = petPhotos.firstIndex(where: { $0.petID == pet.id && $0.photoType == type }) {
-            petPhotos[index].imageURL = "local://pet-photo-\(UUID().uuidString)"
-            petPhotos[index].imageData = imageData
-            petPhotos[index].createdAt = Date()
-            refreshPetProfilePackage(for: pet)
-            return true
-        }
-
+    func savePetPhoto(to pet: Pet, type: PetPhotoType, imageData: Data?, imageRenditions: PetPhotoImageRenditions? = nil) -> Bool {
+        guard photos(for: pet).count < 8 else { return false }
         let photo = PetPhoto(
             id: UUID(),
             petID: pet.id,
@@ -663,11 +801,52 @@ final class AppModel: ObservableObject {
             photoType: type,
             isPrimary: photos(for: pet).isEmpty,
             createdAt: Date(),
-            imageData: imageData
+            imageData: imageData,
+            imageRenditions: imageRenditions
         )
-        petPhotos.insert(photo, at: 0)
+        petPhotos.append(photo)
         refreshPetProfilePackage(for: pet)
         return true
+    }
+
+    @discardableResult
+    func replacePetPhoto(id photoID: UUID, imageData: Data?, imageRenditions: PetPhotoImageRenditions? = nil) -> Bool {
+        guard let index = petPhotos.firstIndex(where: { $0.id == photoID }) else { return false }
+        let petID = petPhotos[index].petID
+        petPhotos[index].imageURL = "local://pet-photo-\(UUID().uuidString)"
+        petPhotos[index].imageData = imageData
+        petPhotos[index].imageRenditions = imageRenditions
+        petPhotos[index].createdAt = Date()
+        if let pet = pets.first(where: { $0.id == petID }) {
+            refreshPetProfilePackage(for: pet)
+        }
+        return true
+    }
+
+    func deletePetPhoto(_ photo: PetPhoto) {
+        let wasPrimary = photo.isPrimary
+        petPhotos.removeAll { $0.id == photo.id }
+        if wasPrimary,
+           let nextIndex = petPhotos.firstIndex(where: { $0.petID == photo.petID }) {
+            petPhotos[nextIndex].isPrimary = true
+        }
+        if let pet = pets.first(where: { $0.id == photo.petID }) {
+            refreshPetProfilePackage(for: pet)
+        }
+    }
+
+    func setPetPhotos(for pet: Pet, photos: [PetPhoto]) {
+        petPhotos.removeAll { $0.petID == pet.id }
+        let normalizedPhotos = photos.prefix(8).enumerated().map { index, photo in
+            var normalizedPhoto = photo
+            normalizedPhoto.petID = pet.id
+            normalizedPhoto.userID = currentUser.id
+            normalizedPhoto.photoType = .petCard
+            normalizedPhoto.isPrimary = index == 0
+            return normalizedPhoto
+        }
+        petPhotos.append(contentsOf: normalizedPhotos)
+        refreshPetProfilePackage(for: pet)
     }
 
     func isFavorite(targetType: FavoriteTargetType, targetID: UUID) -> Bool {
@@ -928,5 +1107,13 @@ final class AppModel: ObservableObject {
         case .groomer:
             currentUser.displayName
         }
+    }
+
+    private static func loadTemporaryGroomingTaskContainer() -> TemporaryGroomingTaskContainer {
+        guard let data = UserDefaults.standard.data(forKey: temporaryGroomingTaskContainerKey),
+              let container = try? JSONDecoder().decode(TemporaryGroomingTaskContainer.self, from: data) else {
+            return .empty()
+        }
+        return container
     }
 }

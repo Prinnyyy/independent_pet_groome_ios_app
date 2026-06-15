@@ -1,4 +1,6 @@
+import CoreLocation
 import MapKit
+import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -7,65 +9,203 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        TabView {
+        TabView(selection: $model.selectedAppTab) {
             if model.activeRole == .petOwner {
                 NavigationStack {
                     HomeView()
                 }
                 .tabItem { Label("Home", systemImage: "house.fill") }
+                .tag("home")
 
                 NavigationStack {
                     SearchView()
                 }
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag("search")
 
                 NavigationStack {
                     PetsView()
                 }
                 .tabItem { Label("Pets", systemImage: "pawprint.fill") }
+                .tag("pets")
 
                 NavigationStack {
                     OrdersView()
                 }
                 .tabItem { Label("Orders", systemImage: "doc.text.fill") }
+                .tag("orders")
             } else {
                 NavigationStack {
                     GroomerTodayView()
                 }
                 .tabItem { Label("Today", systemImage: "chart.line.uptrend.xyaxis") }
+                .tag("groomerToday")
 
                 NavigationStack {
                     GroomerScheduleView()
                 }
                 .tabItem { Label("Schedule", systemImage: "calendar") }
+                .tag("groomerSchedule")
 
                 NavigationStack {
                     GroomerInboxView()
                 }
                 .tabItem { Label("Inbox", systemImage: "tray.fill") }
+                .tag("groomerInbox")
 
                 NavigationStack {
                     GroomerPortfolioManagerView()
                 }
                 .tabItem { Label("Portfolio", systemImage: "photo.stack.fill") }
+                .tag("groomerPortfolio")
             }
 
             NavigationStack {
                 AccountView()
             }
             .tabItem { Label("Account", systemImage: "person.crop.circle.fill") }
+            .tag("account")
         }
         .tint(PetTheme.coral)
     }
 }
 
+struct CustomerChatToolbarModifier: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    @State private var showChatInbox = false
+    let viewerRole: AppRole
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ChatToolbarButton(
+                        hasConversations: model.hasUnreadMessages(for: viewerRole),
+                        action: { showChatInbox = true }
+                    )
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
+                }
+            }
+            .sheet(isPresented: $showChatInbox) {
+                TaskChatInboxView(viewerRole: viewerRole)
+                    .environmentObject(model)
+            }
+    }
+}
+
+extension View {
+    func customerChatToolbar() -> some View {
+        modifier(CustomerChatToolbarModifier(viewerRole: .petOwner))
+    }
+
+    func groomerChatToolbar() -> some View {
+        modifier(CustomerChatToolbarModifier(viewerRole: .groomer))
+    }
+
+    func roleAwareChatToolbar() -> some View {
+        modifier(RoleAwareChatToolbarModifier())
+    }
+}
+
+struct RoleAwareChatToolbarModifier: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+
+    func body(content: Content) -> some View {
+        content.modifier(CustomerChatToolbarModifier(viewerRole: model.activeRole))
+    }
+}
+
+private struct ShakeEffect: GeometryEffect {
+    var trigger: Int
+    var animatableData: CGFloat {
+        get { CGFloat(trigger) }
+        set { trigger = Int(newValue) }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let translation = sin(animatableData * .pi * 3) * 4
+        return ProjectionTransform(CGAffineTransform(translationX: translation, y: 0))
+    }
+}
+
+private enum GroomingTaskReferenceRenditionFactory {
+    static func makeRenditions(from data: Data) -> GroomingTaskReferenceImageRenditions {
+        guard let image = UIImage(data: data) else {
+            return GroomingTaskReferenceImageRenditions(
+                originalData: data,
+                thumbnailData: data,
+                previewData: data,
+                fullScreenData: data
+            )
+        }
+
+        return GroomingTaskReferenceImageRenditions(
+            originalData: data,
+            thumbnailData: centerCroppedJPEGData(from: image, targetSize: CGSize(width: 520, height: 520)),
+            previewData: scaledJPEGData(from: image, fittingInside: CGSize(width: 1200, height: 900)),
+            fullScreenData: scaledJPEGData(from: image, fittingInside: CGSize(width: 2400, height: 2400))
+        )
+    }
+
+    private static func centerCroppedJPEGData(from image: UIImage, targetSize: CGSize) -> Data? {
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0, targetSize.width > 0, targetSize.height > 0 else {
+            return image.jpegData(compressionQuality: 0.86)
+        }
+
+        let targetAspect = targetSize.width / targetSize.height
+        let sourceAspect = sourceSize.width / sourceSize.height
+        let cropSize: CGSize
+        if sourceAspect > targetAspect {
+            cropSize = CGSize(width: sourceSize.height * targetAspect, height: sourceSize.height)
+        } else {
+            cropSize = CGSize(width: sourceSize.width, height: sourceSize.width / targetAspect)
+        }
+
+        let cropOrigin = CGPoint(
+            x: (sourceSize.width - cropSize.width) / 2,
+            y: (sourceSize.height - cropSize.height) / 2
+        )
+        let cropRect = CGRect(origin: cropOrigin, size: cropSize)
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let rendered = renderer.image { _ in
+            image.draw(in: CGRect(
+                x: -cropRect.origin.x * targetSize.width / cropRect.width,
+                y: -cropRect.origin.y * targetSize.height / cropRect.height,
+                width: sourceSize.width * targetSize.width / cropRect.width,
+                height: sourceSize.height * targetSize.height / cropRect.height
+            ))
+        }
+        return rendered.jpegData(compressionQuality: 0.86)
+    }
+
+    private static func scaledJPEGData(from image: UIImage, fittingInside maxSize: CGSize) -> Data? {
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0, maxSize.width > 0, maxSize.height > 0 else {
+            return image.jpegData(compressionQuality: 0.88)
+        }
+        let scale = min(1, maxSize.width / sourceSize.width, maxSize.height / sourceSize.height)
+        let targetSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let rendered = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return rendered.jpegData(compressionQuality: 0.88)
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var locationProvider = CurrentLocationProvider()
     @State private var showNewPet = false
-    @State private var selectedPetIndex = 0
+    @State private var selectedPetID: UUID?
     @State private var selectedService: GroomingTaskService = .bath
     @State private var selectedDate = Date()
     @State private var selectedTimeWindow: GroomingTaskTimeWindow = .eightAM
+    @State private var selectedServiceLocation: GroomingTaskServiceLocation = .atCustomerAddress
     @State private var selectedSearchRadiusMiles = 10
     @State private var selectedAddressSource: GroomingTaskAddressSource = .currentLocation
     @State private var manualTaskAddress: ProfileAddress = .empty
@@ -73,24 +213,28 @@ struct HomeView: View {
     @State private var specialNotes = ""
     @State private var styleReferenceSource: GroomingTaskStyleReferenceSource?
     @State private var styleReferenceImageData: Data?
+    @State private var styleReferenceImageRenditions: GroomingTaskReferenceImageRenditions?
     @State private var selectedStyleReferencePhoto: PhotosPickerItem?
     @State private var showStyleReferencePhotoPicker = false
     @State private var isEditingTask = true
-    @State private var templateSaved = false
-    @State private var showStyleReferenceOptions = false
-    @State private var showTemplatePicker = false
-    @State private var showNoTemplatesAlert = false
-    @State private var showTemplateSavedAlert = false
+    @State private var hasLoadedTemporaryTaskContainer = false
+    @State private var styleGoalLimitFeedback = false
+    @State private var styleGoalShakeTrigger = 0
     @State private var showStyleReferenceTooLargeAlert = false
-    @State private var showAddressPicker = false
+    @State private var showStyleReferenceCameraPicker = false
+    @State private var showCameraUnavailableAlert = false
+    @State private var showManualAddressEntry = false
     @State private var showTaskDatePicker = false
     @State private var selectedGroomerForDetails: Groomer?
-    @State private var showChatInbox = false
 
     private var selectedPet: Pet? {
-        guard model.pets.indices.contains(selectedPetIndex) else { return model.pets.first }
-        return model.pets[selectedPetIndex]
+        if let selectedPetID, let pet = model.pets.first(where: { $0.id == selectedPetID }) {
+            return pet
+        }
+        return model.pets.first
     }
+
+    private let styleGoalCharacterLimit = 100
 
     private var todayStart: Date {
         Calendar.current.startOfDay(for: Date())
@@ -109,7 +253,10 @@ struct HomeView: View {
     }
 
     private var currentLocationAddress: ProfileAddress {
-        ProfileAddress(
+        if let resolvedAddress = locationProvider.currentAddress {
+            return resolvedAddress
+        }
+        return ProfileAddress(
             streetLine1: "",
             streetLine2: "",
             city: model.currentUser.city,
@@ -163,15 +310,12 @@ struct HomeView: View {
                                 clearTaskDraft()
                                 model.cancelGroomingTask()
                                 isEditingTask = true
-                                templateSaved = false
                             }
                         }
                     )
                     .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                 } else {
-                    if isEditingTask || model.currentGroomingTask == nil {
-                        taskBuilderHeader
-                    }
+                    taskBuilderHeader
                     groomingTaskBuilder
                 }
 
@@ -197,6 +341,7 @@ struct HomeView: View {
                                 contactTitle: pendingSubmission == nil ? "Send Card" : "Revoke",
                                 contactIcon: pendingSubmission == nil ? "paperplane.fill" : "arrow.uturn.backward.circle.fill",
                                 isContactDisabled: false,
+                                contactMismatchReasons: [],
                                 secondaryTitle: "Details",
                                 secondaryIcon: "person.text.rectangle",
                                 onSecondaryAction: { selectedGroomerForDetails = groomer }
@@ -211,32 +356,59 @@ struct HomeView: View {
             .animation(homeTransitionAnimation, value: model.currentGroomingTask?.id)
         }
         .appBackground()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                ChatToolbarButton(
-                    hasConversations: !model.chatConversations(for: .petOwner).isEmpty,
-                    action: { showChatInbox = true }
-                )
-            }
-        }
+        .customerChatToolbar()
         .sheet(isPresented: $showNewPet) {
             PetEditorView(mode: .create)
                 .environmentObject(model)
         }
-        .sheet(isPresented: $showChatInbox) {
-            TaskChatInboxView(viewerRole: .petOwner)
-                .environmentObject(model)
-        }
-        .sheet(isPresented: $showAddressPicker) {
-            TaskAddressPickerView(
-                selectedSource: $selectedAddressSource,
-                manualAddress: $manualTaskAddress
-            )
+        .sheet(isPresented: $showManualAddressEntry) {
+            ManualAddressEntryView(initialAddress: manualTaskAddress, showsHomeAddressToggle: true) { address, shouldUpdateHomeAddress in
+                manualTaskAddress = address
+                selectedAddressSource = .manualEntry
+                if shouldUpdateHomeAddress {
+                    var profile = model.customerPersonalProfile
+                    profile.address = address
+                    model.updateCustomerPersonalProfile(profile)
+                }
+                showManualAddressEntry = false
+            } onCancel: {
+                showManualAddressEntry = false
+            }
             .environmentObject(model)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showTaskDatePicker) {
-            NavigationStack {
-                VStack(spacing: 16) {
+            VStack(spacing: 14) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Choose date")
+                            .font(.title3.weight(.bold))
+                            .fontDesign(.rounded)
+                            .foregroundStyle(PetTheme.ink)
+                        Text("Past dates are unavailable.")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PetTheme.muted)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        showTaskDatePicker = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PetTheme.muted)
+                            .frame(width: 32, height: 32)
+                            .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close date picker")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+
+                VStack(spacing: 10) {
                     DatePicker(
                         "Task date",
                         selection: $selectedDate,
@@ -246,108 +418,85 @@ struct HomeView: View {
                     .datePickerStyle(.graphical)
                     .tint(PetTheme.coral)
                     .labelsHidden()
-                    .padding(12)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(PetTheme.line.opacity(0.55), lineWidth: 1)
-                    )
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(PetTheme.line.opacity(0.55), lineWidth: 1)
+                )
+                .padding(.horizontal, 18)
 
-                    Button {
-                        showTaskDatePicker = false
-                    } label: {
-                        Label("Use This Date", systemImage: "checkmark.circle.fill")
-                    }
-                    .buttonStyle(CoralButtonStyle())
+                Spacer(minLength: 0)
+
+                Button {
+                    showTaskDatePicker = false
+                } label: {
+                    Label("Use This Date", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
                 }
-                .padding(18)
-                .appBackground()
-                .navigationTitle("Choose date")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
-                            showTaskDatePicker = false
-                        }
-                        .foregroundStyle(PetTheme.coralDark)
-                    }
-                }
+                .buttonStyle(CoralButtonStyle())
+                .padding(.horizontal, 18)
+                .padding(.bottom, 18)
             }
-            .presentationDetents([.medium])
+            .appBackground()
+            .safeAreaPadding(.bottom, 10)
+            .presentationDetents([.fraction(0.72), .large])
+            .presentationDragIndicator(.visible)
         }
         .navigationDestination(item: $selectedGroomerForDetails) { groomer in
             GroomerProfileView(groomer: groomer)
         }
-        .onChange(of: model.pets.count) { _, _ in
-            if selectedPetIndex >= model.pets.count {
-                selectedPetIndex = max(0, model.pets.count - 1)
+        .onChange(of: model.pets.map(\.id)) { _, petIDs in
+            if let selectedPetID, petIDs.contains(selectedPetID) {
+                return
             }
+            self.selectedPetID = petIDs.first
         }
         .onAppear {
+            restoreTemporaryTaskContainerIfNeeded()
             if selectedDate < todayStart {
                 selectedDate = todayStart
             }
         }
+        .onChange(of: selectedPetID) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedService) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedDate) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedTimeWindow) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedServiceLocation) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedSearchRadiusMiles) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: selectedAddressSource) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: manualTaskAddress) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: styleGoal) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: specialNotes) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: styleReferenceSource) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: styleReferenceImageData) { _, _ in saveTemporaryDraft(state: .editing) }
+        .onChange(of: styleReferenceImageRenditions) { _, _ in saveTemporaryDraft(state: .editing) }
     }
 
     private var taskBuilderHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Image(systemName: "clipboard.badge.plus")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(PetTheme.coral)
-                    Text("Task card studio")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(PetTheme.coralDark)
-                        .textCase(.uppercase)
-                }
+        let hasGeneratedTask = model.currentGroomingTask != nil && !isEditingTask
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(hasGeneratedTask ? "Recommended groomers" : "Create a task card")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(PetTheme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
 
-                Text("Build today’s grooming task")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(PetTheme.ink)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.84)
-
-                Text("Turn this visit into one clear card: pet, time, address, style goal, and notes.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(PetTheme.muted)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 8)
-
-            Button {
-                if model.savedGroomingTaskTemplates.isEmpty {
-                    showNoTemplatesAlert = true
-                } else {
-                    showTemplatePicker = true
-                }
-            } label: {
-                VStack(spacing: 3) {
-                    Image(systemName: "bookmark")
-                        .font(.headline.weight(.semibold))
-                    Text("Templates")
-                        .font(.caption2.weight(.bold))
-                }
-                .frame(width: 72, height: 54)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(PetTheme.coralDark)
-            .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(PetTheme.line.opacity(0.7), lineWidth: 1)
-            )
-            .accessibilityLabel("Choose a saved task template")
+            Text(hasGeneratedTask ? "These groomer cards match this task’s pet, timing, location, and style goal." : "Set the pet, time, place, and style goal before choosing a groomer.")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(PetTheme.muted)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [PetTheme.porcelain, PetTheme.apricot.opacity(0.5)],
+                        colors: [PetTheme.porcelain, PetTheme.apricot.opacity(0.44)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
@@ -369,28 +518,26 @@ struct HomeView: View {
                     task: task,
                     pet: pet,
                     recommendedCount: model.recommendedGroomers(for: task).count,
-                    isTemplateSaved: templateSaved,
-                    onSaveTemplate: {
-                        model.saveCurrentGroomingTaskAsTemplate()
-                        templateSaved = true
-                        showTemplateSavedAlert = true
-                    },
-                    onEdit: {
+                    onRewrite: {
                         populateDraft(from: task)
-                        isEditingTask = true
+                        withAnimation(homeTransitionAnimation) {
+                            model.cancelGroomingTask()
+                            isEditingTask = true
+                        }
+                        saveTemporaryDraft(state: .editing)
                     }
                 )
                 .padding(.horizontal, 18)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     if model.pets.isEmpty {
-                        Text("Create a pet profile first so this task can use your pet list.")
+                        Text("Create a pet card first so this task can use your pet list.")
                             .font(.subheadline)
                             .foregroundStyle(PetTheme.muted)
                         Button {
                             showNewPet = true
                         } label: {
-                            Label("Create pet profile", systemImage: "plus.circle.fill")
+                            Label("Create Pet Card", systemImage: "plus.circle.fill")
                         }
                         .buttonStyle(CoralButtonStyle())
                     } else {
@@ -410,65 +557,79 @@ struct HomeView: View {
                 .padding(.horizontal, 18)
             }
         }
-        .confirmationDialog("Add style reference", isPresented: $showStyleReferenceOptions, titleVisibility: .visible) {
-            Button("Take Photo") {
-                styleReferenceSource = .camera
-                styleReferenceImageData = nil
-                selectedStyleReferencePhoto = nil
-            }
-            Button("Upload from Photos") {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    showStyleReferencePhotoPicker = true
-                }
-            }
-            if styleReferenceSource != nil {
-                Button("Remove Reference", role: .destructive) {
-                    styleReferenceSource = nil
-                    styleReferenceImageData = nil
-                    selectedStyleReferencePhoto = nil
-                }
-            }
-        } message: {
-            Text("Attach a style you like so the groomer can understand the look.")
-        }
         .photosPicker(isPresented: $showStyleReferencePhotoPicker, selection: $selectedStyleReferencePhoto, matching: .images)
         .onChange(of: selectedStyleReferencePhoto) { _, item in
             loadStyleReferenceImage(from: item)
         }
-        .confirmationDialog("Saved task templates", isPresented: $showTemplatePicker, titleVisibility: .visible) {
-            ForEach(model.savedGroomingTaskTemplates) { template in
-                Button(templateOptionTitle(for: template)) {
-                    applyTemplate(template)
+        .sheet(isPresented: $showStyleReferenceCameraPicker) {
+            CameraPhotoPicker { data in
+                if data.count > GroomingTaskReferenceImageSlot.maxByteSize {
+                    styleReferenceSource = nil
+                    styleReferenceImageData = nil
+                    styleReferenceImageRenditions = nil
+                    selectedStyleReferencePhoto = nil
+                    showStyleReferenceTooLargeAlert = true
+                } else {
+                    let renditions = GroomingTaskReferenceRenditionFactory.makeRenditions(from: data)
+                    styleReferenceSource = .camera
+                    styleReferenceImageData = data
+                    styleReferenceImageRenditions = renditions
+                    selectedStyleReferencePhoto = nil
+                    saveTemporaryDraft(state: .editing)
                 }
             }
-        } message: {
-            Text("Choosing a template fills the task details but leaves the date as today.")
-        }
-        .alert("No saved templates yet", isPresented: $showNoTemplatesAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Create a task card, then tap the bookmark to save it as a reusable template.")
-        }
-        .alert("Saved as task card template", isPresented: $showTemplateSavedAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("You can reuse this task setup from Templates next time. The date will reset for each new request.")
+            .ignoresSafeArea()
         }
         .alert("Photo is too large", isPresented: $showStyleReferenceTooLargeAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Please upload one style reference photo smaller than 10 MB.")
         }
+        .alert("Camera unavailable", isPresented: $showCameraUnavailableAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("This simulator or device does not currently provide a camera. Please upload from Photos instead.")
+        }
     }
 
     private var taskForm: some View {
         VStack(spacing: 8) {
+            HStack {
+                Text("Task details")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(PetTheme.coralDark)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                Button {
+                    if let template = model.savedGroomingTaskTemplates.first {
+                        applyTemplate(template)
+                    }
+                } label: {
+                    Label("Last Template", systemImage: "clock.arrow.circlepath")
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(model.savedGroomingTaskTemplates.isEmpty ? PetTheme.muted.opacity(0.72) : PetTheme.coralDark)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(PetTheme.line.opacity(0.55), lineWidth: 1)
+                )
+                .disabled(model.savedGroomingTaskTemplates.isEmpty)
+                .accessibilityLabel("Use last generated task template")
+            }
+
             Grid(horizontalSpacing: 8, verticalSpacing: 8) {
                 GridRow {
                     taskField(title: "Pet") {
-                        Picker("Pet", selection: $selectedPetIndex) {
-                            ForEach(Array(model.pets.enumerated()), id: \.element.id) { index, pet in
-                                Text(pet.name).tag(index)
+                        Picker("Pet", selection: selectedPetIDBinding) {
+                            ForEach(model.pets) { pet in
+                                Text(pet.name).tag(Optional(pet.id))
                             }
                         }
                         .pickerStyle(.menu)
@@ -514,22 +675,13 @@ struct HomeView: View {
                 }
 
                 GridRow {
-                    taskField(title: "Start from") {
-                        Button {
-                            showAddressPicker = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: selectedAddressSource.iconName)
-                                Text(currentSearchArea.locationTitle)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.76)
-                                Spacer(minLength: 2)
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.bold))
+                    taskField(title: "Grooming place") {
+                        Picker("Grooming place", selection: $selectedServiceLocation) {
+                            ForEach(GroomingTaskServiceLocation.allCases) { location in
+                                Text(location.displayTitle).tag(location)
                             }
-                            .foregroundStyle(PetTheme.coral)
                         }
-                        .buttonStyle(.plain)
+                        .pickerStyle(.menu)
                     }
 
                     taskField(title: "Radius") {
@@ -541,6 +693,45 @@ struct HomeView: View {
                         .pickerStyle(.menu)
                     }
                 }
+
+                GridRow {
+                    taskField(title: "Start from") {
+                        Menu {
+                            Button {
+                                selectedAddressSource = .currentLocation
+                                locationProvider.requestCurrentLocation()
+                            } label: {
+                                Label("Current Location", systemImage: "location.fill")
+                            }
+
+                            Button {
+                                selectedAddressSource = .savedProfileAddress
+                            } label: {
+                                Label("Home Address", systemImage: "house.fill")
+                            }
+                            .disabled(model.customerPersonalProfile.address.isEmpty)
+
+                            Button {
+                                showManualAddressEntry = true
+                            } label: {
+                                Label("New Address", systemImage: "mappin.and.ellipse")
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: selectedAddressSource.iconName)
+                                Text(currentSearchArea.locationTitle)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.76)
+                                Spacer(minLength: 2)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(PetTheme.coral)
+                        }
+                    }
+
+                    Color.clear
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -548,13 +739,42 @@ struct HomeView: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(PetTheme.muted)
 
-                HStack(alignment: .top, spacing: 7) {
-                    TextField("Bath only, teddy face, summer cut", text: $styleGoal, axis: .vertical)
+                HStack(alignment: .center, spacing: 8) {
+                    TextField("Bath only, teddy face, summer cut", text: limitedStyleGoalBinding, axis: .vertical)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1...2)
+                        .lineLimit(2, reservesSpace: true)
+                        .frame(height: 42, alignment: .topLeading)
+                        .tint(styleGoalLimitFeedback ? PetTheme.coral : PetTheme.sage)
+                        .modifier(ShakeEffect(trigger: styleGoalShakeTrigger))
 
-                    Button {
-                        showStyleReferenceOptions = true
+                    Menu {
+                        Button {
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                showStyleReferenceCameraPicker = true
+                            } else {
+                                showCameraUnavailableAlert = true
+                            }
+                        } label: {
+                            Label("Take Photo", systemImage: "camera.fill")
+                        }
+
+                        Button {
+                            showStyleReferencePhotoPicker = true
+                        } label: {
+                            Label("Upload from Photos", systemImage: "photo.fill.on.rectangle.fill")
+                        }
+
+                        if styleReferenceSource != nil {
+                            Button(role: .destructive) {
+                                styleReferenceSource = nil
+                                styleReferenceImageData = nil
+                                styleReferenceImageRenditions = nil
+                                selectedStyleReferencePhoto = nil
+                                saveTemporaryDraft(state: .editing)
+                            } label: {
+                                Label("Remove Reference", systemImage: "trash")
+                            }
+                        }
                     } label: {
                         Image(systemName: styleReferenceSource == nil ? "photo.badge.plus" : "photo.badge.checkmark")
                             .font(.headline.weight(.semibold))
@@ -576,16 +796,18 @@ struct HomeView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+                    .stroke(styleGoalLimitFeedback ? PetTheme.coral.opacity(0.75) : PetTheme.line.opacity(0.42), lineWidth: 1)
             )
+            .animation(.smooth(duration: 0.18), value: styleGoalLimitFeedback)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Special notes")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(PetTheme.muted)
-                TextField("Matting, sensitive skin, afraid of dryers", text: $specialNotes, axis: .vertical)
+                LimitedTextField("Matting, sensitive skin, afraid of dryers", text: $specialNotes, limit: 240, axis: .vertical)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1...2)
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(height: 42, alignment: .topLeading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -595,19 +817,34 @@ struct HomeView: View {
                     .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
             )
 
-            Button {
-                generateTaskCard()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: model.currentGroomingTask == nil ? "doc.badge.plus" : "arrow.triangle.2.circlepath.doc.on.clipboard")
-                        .font(.headline.weight(.bold))
-                    Text(model.currentGroomingTask == nil ? "Create Task Card" : "Update Task Card")
-                        .font(.headline.weight(.bold))
+            HStack(spacing: 9) {
+                Button {
+                    generateTaskCard()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: model.currentGroomingTask == nil ? "doc.badge.plus" : "arrow.triangle.2.circlepath.doc.on.clipboard")
+                            .font(.headline.weight(.bold))
+                        Text(model.currentGroomingTask == nil ? "Create Task Card" : "Update Task Card")
+                            .font(.headline.weight(.bold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 2)
+                .buttonStyle(CoralButtonStyle())
+
+                Button {
+                    resetTemporaryTaskDraft()
+                } label: {
+                    Label("Clear", systemImage: "eraser.fill")
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .frame(width: 76)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(QuietButtonStyle())
+                .accessibilityLabel("Clear task card draft")
             }
-            .buttonStyle(CoralButtonStyle())
         }
     }
 
@@ -632,6 +869,106 @@ struct HomeView: View {
         )
     }
 
+    private var limitedStyleGoalBinding: Binding<String> {
+        Binding(
+            get: { styleGoal },
+            set: { newValue in
+                guard newValue.count <= styleGoalCharacterLimit else {
+                    if styleGoal.count < styleGoalCharacterLimit {
+                        styleGoal = String(newValue.prefix(styleGoalCharacterLimit))
+                    }
+                    triggerStyleGoalLimitFeedback()
+                    return
+                }
+                styleGoal = newValue
+            }
+        )
+    }
+
+    private var selectedPetIDBinding: Binding<UUID?> {
+        Binding(
+            get: { selectedPet?.id },
+            set: { newValue in selectedPetID = newValue }
+        )
+    }
+
+    private func triggerStyleGoalLimitFeedback() {
+        withAnimation(.linear(duration: 0.18)) {
+            styleGoalShakeTrigger += 1
+        }
+        styleGoalLimitFeedback = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            styleGoalLimitFeedback = false
+        }
+    }
+
+    private func restoreTemporaryTaskContainerIfNeeded() {
+        guard !hasLoadedTemporaryTaskContainer else { return }
+        let container = model.temporaryGroomingTaskContainer
+
+        switch container.state {
+        case .noData:
+            clearTaskDraft()
+            isEditingTask = true
+        case .editing:
+            applyTemporaryContainer(container)
+            model.currentGroomingTask = nil
+            isEditingTask = true
+        case .completed:
+            applyTemporaryContainer(container)
+            model.currentGroomingTask = container.completedTask
+            isEditingTask = false
+        }
+        hasLoadedTemporaryTaskContainer = true
+    }
+
+    private func applyTemporaryContainer(_ container: TemporaryGroomingTaskContainer) {
+        selectedPetID = container.petID ?? model.pets.first?.id
+        selectedService = container.service
+        selectedDate = container.targetDate < todayStart ? todayStart : container.targetDate
+        selectedTimeWindow = container.timeWindow
+        selectedServiceLocation = container.serviceLocation
+        selectedSearchRadiusMiles = container.searchArea.radiusMiles
+        selectedAddressSource = container.searchArea.addressSource
+        manualTaskAddress = ProfileAddress(
+            streetLine1: container.searchArea.streetLine1,
+            streetLine2: container.searchArea.streetLine2,
+            city: container.searchArea.city,
+            state: container.searchArea.state,
+            postalCode: container.searchArea.zipCode,
+            country: container.searchArea.country
+        )
+        styleGoal = String(container.styleGoal.prefix(styleGoalCharacterLimit))
+        specialNotes = container.specialNotes
+        styleReferenceSource = container.styleReferenceSource
+        styleReferenceImageData = container.styleReferenceImageData
+        styleReferenceImageRenditions = container.styleReferenceImageRenditions
+    }
+
+    private func saveTemporaryDraft(state: TemporaryGroomingTaskContainerState) {
+        guard hasLoadedTemporaryTaskContainer, state != .noData else { return }
+        guard let petID = selectedPet?.id else { return }
+        let completedTask = state == .completed ? model.currentGroomingTask : nil
+        model.saveTemporaryGroomingTaskContainer(
+            TemporaryGroomingTaskContainer(
+                state: state,
+                petID: petID,
+                service: selectedService,
+                targetDate: selectedDate < todayStart ? todayStart : selectedDate,
+                timeWindow: selectedTimeWindow,
+                serviceLocation: selectedServiceLocation,
+                searchArea: currentSearchArea,
+                styleGoal: String(styleGoal.prefix(styleGoalCharacterLimit)),
+                specialNotes: specialNotes,
+                styleReferenceSource: styleReferenceSource,
+                styleReferenceImageData: styleReferenceImageData,
+                styleReferenceImageRenditions: styleReferenceImageRenditions,
+                completedTask: completedTask,
+                updatedAt: Date()
+            )
+        )
+    }
+
     private func defaultStyleGoal(for service: GroomingTaskService) -> String {
         switch service {
         case .bath: "Clean coat, bath, dry, and brush-out"
@@ -653,9 +990,29 @@ struct HomeView: View {
         let resolvedStyleGoal = cleanedStyleGoal.isEmpty ? defaultStyleGoal(for: selectedService) : cleanedStyleGoal
 
         if let currentTask = model.currentGroomingTask, draftMatches(currentTask, styleGoal: resolvedStyleGoal, targetDate: safeDate) {
+            model.saveTemporaryGroomingTaskContainer(
+                TemporaryGroomingTaskContainer(
+                    state: .completed,
+                    petID: currentTask.petID,
+                    service: currentTask.service,
+                    targetDate: currentTask.targetDate,
+                    timeWindow: currentTask.timeWindow,
+                    serviceLocation: currentTask.serviceLocation,
+                    searchArea: currentTask.searchArea,
+                    styleGoal: currentTask.styleGoal,
+                    specialNotes: currentTask.specialNotes,
+                    styleReferenceSource: currentTask.styleReferenceSource,
+                    styleReferenceImageData: currentTask.referenceImageSlot.imageData,
+                    styleReferenceImageRenditions: currentTask.referenceImageSlot.imageRenditions,
+                    completedTask: currentTask,
+                    updatedAt: Date()
+                )
+            )
+            model.saveCurrentGroomingTaskAsTemplate()
             withAnimation(homeTransitionAnimation) {
                 isEditingTask = false
             }
+            returnToSearchIfNeeded()
             return
         }
 
@@ -665,14 +1022,25 @@ struct HomeView: View {
                 service: selectedService,
                 targetDate: safeDate,
                 timeWindow: selectedTimeWindow,
+                serviceLocation: selectedServiceLocation,
                 searchArea: currentSearchArea,
                 styleGoal: resolvedStyleGoal,
                 specialNotes: cleaned(specialNotes),
                 styleReferenceSource: styleReferenceSource,
-                styleReferenceImageData: styleReferenceImageData
+                styleReferenceImageData: styleReferenceImageData,
+                styleReferenceImageRenditions: styleReferenceImageRenditions
             )
+            model.saveCurrentGroomingTaskAsTemplate()
             isEditingTask = false
-            templateSaved = false
+        }
+        returnToSearchIfNeeded()
+    }
+
+    private func returnToSearchIfNeeded() {
+        guard model.shouldReturnToSearchAfterTaskCreation else { return }
+        model.shouldReturnToSearchAfterTaskCreation = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            model.selectedAppTab = "search"
         }
     }
 
@@ -681,20 +1049,21 @@ struct HomeView: View {
         return selectedService == task.service &&
             Calendar.current.isDate(safeDate, inSameDayAs: task.targetDate) &&
             selectedTimeWindow == task.timeWindow &&
+            selectedServiceLocation == task.serviceLocation &&
             currentSearchArea == task.searchArea &&
             resolvedStyleGoal == task.styleGoal &&
             cleaned(specialNotes) == task.specialNotes &&
             styleReferenceSource == task.styleReferenceSource &&
-            styleReferenceImageData == task.referenceImageSlot.imageData
+            styleReferenceImageData == task.referenceImageSlot.imageData &&
+            styleReferenceImageRenditions == task.referenceImageSlot.imageRenditions
     }
 
     private func populateDraft(from task: GroomingTask) {
-        if let petIndex = model.pets.firstIndex(where: { $0.id == task.petID }) {
-            selectedPetIndex = petIndex
-        }
+        selectedPetID = task.petID
         selectedService = task.service
         selectedDate = task.targetDate < todayStart ? todayStart : task.targetDate
         selectedTimeWindow = task.timeWindow
+        selectedServiceLocation = task.serviceLocation
         selectedSearchRadiusMiles = task.searchArea.radiusMiles
         selectedAddressSource = task.searchArea.addressSource
         manualTaskAddress = ProfileAddress(
@@ -709,13 +1078,15 @@ struct HomeView: View {
         specialNotes = task.specialNotes
         styleReferenceSource = task.styleReferenceSource
         styleReferenceImageData = task.referenceImageSlot.imageData
+        styleReferenceImageRenditions = task.referenceImageSlot.imageRenditions
     }
 
     private func clearTaskDraft() {
-        selectedPetIndex = 0
+        selectedPetID = model.pets.first?.id
         selectedService = .bath
         selectedDate = todayStart
         selectedTimeWindow = .eightAM
+        selectedServiceLocation = .atCustomerAddress
         selectedSearchRadiusMiles = 10
         selectedAddressSource = .currentLocation
         manualTaskAddress = .empty
@@ -723,31 +1094,37 @@ struct HomeView: View {
         specialNotes = ""
         styleReferenceSource = nil
         styleReferenceImageData = nil
+        styleReferenceImageRenditions = nil
         selectedStyleReferencePhoto = nil
     }
 
-    private func applyTemplate(_ template: GroomingTaskTemplate) {
-        if let petIndex = model.pets.firstIndex(where: { $0.id == template.petID }) {
-            selectedPetIndex = petIndex
+    private func resetTemporaryTaskDraft() {
+        withAnimation(homeTransitionAnimation) {
+            model.currentGroomingTask = nil
+            model.clearTemporaryGroomingTaskContainer()
+            hasLoadedTemporaryTaskContainer = false
+            restoreTemporaryTaskContainerIfNeeded()
+            isEditingTask = true
         }
+    }
+
+    private func applyTemplate(_ template: GroomingTaskTemplate) {
+        selectedPetID = template.petID
         selectedService = template.service
         selectedDate = todayStart
         selectedTimeWindow = template.timeWindow
+        selectedServiceLocation = template.serviceLocation
         selectedSearchRadiusMiles = template.searchArea.radiusMiles
         selectedAddressSource = template.searchArea.addressSource == .manualEntry ? .currentLocation : template.searchArea.addressSource
         manualTaskAddress = .empty
         styleGoal = template.styleGoal
         specialNotes = template.specialNotes
         styleReferenceSource = template.styleReferenceSource
-        styleReferenceImageData = nil
+        styleReferenceImageData = template.styleReferenceImageData
+        styleReferenceImageRenditions = template.styleReferenceImageRenditions
         model.cancelGroomingTask()
         isEditingTask = true
-        templateSaved = false
-    }
-
-    private func templateOptionTitle(for template: GroomingTaskTemplate) -> String {
-        let petName = model.pets.first { $0.id == template.petID }?.name ?? "Pet"
-        return "\(petName) · \(template.service.rawValue) · \(template.timeWindow.displayTitle)"
+        saveTemporaryDraft(state: .editing)
     }
 
     private func cleaned(_ value: String) -> String {
@@ -762,11 +1139,15 @@ struct HomeView: View {
                 if data.count > GroomingTaskReferenceImageSlot.maxByteSize {
                     styleReferenceSource = nil
                     styleReferenceImageData = nil
+                    styleReferenceImageRenditions = nil
                     selectedStyleReferencePhoto = nil
                     showStyleReferenceTooLargeAlert = true
                 } else {
+                    let renditions = GroomingTaskReferenceRenditionFactory.makeRenditions(from: data)
                     styleReferenceSource = .photoLibrary
                     styleReferenceImageData = data
+                    styleReferenceImageRenditions = renditions
+                    saveTemporaryDraft(state: .editing)
                 }
             }
         }
@@ -774,27 +1155,41 @@ struct HomeView: View {
 }
 
 struct GroomingTaskCard: View {
+    @State private var isDetailsExpanded = false
+    @State private var showStyleReferencePreview = false
+
     let task: GroomingTask
     let pet: Pet
     let recommendedCount: Int
-    let isTemplateSaved: Bool
-    let onSaveTemplate: () -> Void
-    let onEdit: () -> Void
+    let onRewrite: () -> Void
     var statusLabel: String?
     var showsActions: Bool = true
+
+    private var canCollapseDetails: Bool {
+        showsActions && statusLabel == nil
+    }
+
+    private var shouldShowDetails: Bool {
+        !canCollapseDetails || isDetailsExpanded
+    }
 
     private var dateText: String {
         task.targetDate.formatted(date: .abbreviated, time: .omitted)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Task card")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(PetTheme.coralDark)
-                        .textCase(.uppercase)
+                    HStack(spacing: 7) {
+                        Image(systemName: "rectangle.stack.badge.person.crop")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PetTheme.coral)
+                        Text("Task card")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(PetTheme.coralDark)
+                            .textCase(.uppercase)
+                    }
                     Text(task.service.rawValue)
                         .font(.title2.weight(.bold))
                         .fontDesign(.rounded)
@@ -807,67 +1202,27 @@ struct GroomingTaskCard: View {
                 Spacer()
                 if let statusLabel {
                     Chip(text: statusLabel, color: PetTheme.mint)
-                } else {
-                    Button(action: onSaveTemplate) {
-                        Image(systemName: isTemplateSaved ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(isTemplateSaved ? PetTheme.coral : Color.gray.opacity(0.75))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isTemplateSaved ? "Task template saved" : "Save task template")
                 }
             }
 
-            HStack(spacing: 7) {
-                Chip(text: statusLabel == nil ? "\(recommendedCount) public groomer cards matched" : "Task card locked", color: PetTheme.mint)
-                Chip(text: task.referenceImageSlot.hasImage ? "Style photo attached" : "No style photo", color: task.referenceImageSlot.hasImage ? PetTheme.sky : Color.gray.opacity(0.24))
+            matchSummary
+                .zIndex(1)
+
+            if canCollapseDetails {
+                detailsToggle
+                    .zIndex(1)
             }
 
-            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                GridRow {
-                    GroomingTaskFact(iconName: "calendar", title: "Date", value: dateText)
-                    GroomingTaskFact(iconName: "clock", title: "Time", value: task.timeWindow.displayTitle)
-                }
-                GridRow {
-                    GroomingTaskFact(iconName: task.searchArea.addressSource.iconName, title: "Start from", value: task.searchArea.locationTitle)
-                    GroomingTaskFact(iconName: "scope", title: "Range", value: task.searchArea.rangeTitle)
-                }
+            if shouldShowDetails {
+                taskDetails
+                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
+                    .zIndex(0)
             }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Label("Style goal", systemImage: "scissors")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(PetTheme.coralDark)
-                Text(task.styleGoal)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(PetTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
-            )
-
-            VStack(alignment: .leading, spacing: 7) {
-                Label("Saved as a local task-card package", systemImage: "shippingbox.fill")
-                StyleReferenceImageButton(slot: task.referenceImageSlot)
-                Label("\(task.petPhotoSnapshots.count) pet profile photos captured", systemImage: "photo.on.rectangle")
-                if !task.specialNotes.isEmpty {
-                    Label(task.specialNotes, systemImage: "exclamationmark.bubble")
-                }
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(PetTheme.muted)
-            .padding(10)
-            .background(PetTheme.apricot.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             if showsActions {
                 HStack(spacing: 10) {
-                    Button(action: onEdit) {
-                        Label("Edit", systemImage: "pencil")
+                    Button(action: onRewrite) {
+                        Label("Rewrite Card", systemImage: "arrow.counterclockwise.circle.fill")
                     }
                     .buttonStyle(CoralButtonStyle())
                 }
@@ -879,8 +1234,8 @@ struct GroomingTaskCard: View {
                 .fill(
                     LinearGradient(
                         colors: [.white, PetTheme.porcelain, PetTheme.apricot.opacity(0.22)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
                 )
                 .shadow(color: .black.opacity(0.06), radius: 14, x: 0, y: 7)
@@ -894,6 +1249,123 @@ struct GroomingTaskCard: View {
                 .fill(PetTheme.coral)
                 .frame(width: 4)
                 .padding(.vertical, 14)
+        }
+        .overlay {
+            GeometryReader { proxy in
+                if showStyleReferencePreview {
+                    let origin = proxy.frame(in: .global).origin
+
+                    StyleReferencePreviewOverlay(slot: task.referenceImageSlot) {
+                        withAnimation(.smooth(duration: 0.18)) {
+                            showStyleReferencePreview = false
+                        }
+                    }
+                    .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                    .offset(x: -origin.x, y: -origin.y)
+                    .zIndex(10_000)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+        }
+        .zIndex(showStyleReferencePreview ? 10_000 : 0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isDetailsExpanded)
+    }
+
+    private var matchSummary: some View {
+        HStack(spacing: 9) {
+            Image(systemName: statusLabel == nil ? "sparkles" : "lock.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.sage)
+                .frame(width: 24, height: 24)
+                .background(PetTheme.mint.opacity(0.28), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text(statusLabel == nil ? "\(recommendedCount) groomer cards matched" : "Task card locked")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+        )
+    }
+
+    private var detailsToggle: some View {
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                isDetailsExpanded.toggle()
+            }
+        } label: {
+            Image(systemName: isDetailsExpanded ? "chevron.compact.up" : "chevron.compact.down")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(PetTheme.muted.opacity(0.72))
+                .frame(maxWidth: .infinity)
+                .frame(height: 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isDetailsExpanded ? "Collapse task details" : "Expand task details")
+    }
+
+    private var taskDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                GridRow {
+                    GroomingTaskFact(iconName: "calendar", title: "Date", value: dateText)
+                    GroomingTaskFact(iconName: "clock", title: "Time", value: task.timeWindow.displayTitle)
+                }
+                GridRow {
+                    GroomingTaskFact(iconName: task.searchArea.addressSource.iconName, title: "Start from", value: task.searchArea.locationTitle)
+                    GroomingTaskFact(iconName: "scope", title: "Range", value: task.searchArea.rangeTitle)
+                }
+                GridRow {
+                    GroomingTaskFact(iconName: task.serviceLocation.iconName, title: "Grooming place", value: task.serviceLocation.shortTitle)
+                    Color.clear
+                }
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("Style goal", systemImage: "scissors")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.coralDark)
+                    Text(task.styleGoal)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(PetTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                StyleReferenceImageButton(slot: task.referenceImageSlot) {
+                    withAnimation(.smooth(duration: 0.2)) {
+                        showStyleReferencePreview = true
+                    }
+                }
+            }
+            .padding(10)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+            )
+
+            if !task.specialNotes.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("Notes", systemImage: "exclamationmark.bubble")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(PetTheme.coralDark)
+                    Text(task.specialNotes)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PetTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(PetTheme.apricot.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
         }
     }
 }
@@ -931,9 +1403,7 @@ struct AcceptedTaskConfirmationView: View {
                 task: task,
                 pet: pet,
                 recommendedCount: 0,
-                isTemplateSaved: false,
-                onSaveTemplate: {},
-                onEdit: {},
+                onRewrite: {},
                 statusLabel: "Accepted",
                 showsActions: false
             )
@@ -974,68 +1444,211 @@ struct StyleReferenceImageButton: View {
     @State private var showPreview = false
 
     let slot: GroomingTaskReferenceImageSlot
+    var onPreview: (() -> Void)? = nil
 
     var body: some View {
+        GeometryReader { proxy in
+            referenceButton
+                .overlay(alignment: .topLeading) {
+                    if showPreview {
+                        let origin = proxy.frame(in: .global).origin
+
+                        StyleReferencePreviewOverlay(slot: slot) {
+                            withAnimation(.smooth(duration: 0.18)) {
+                                showPreview = false
+                            }
+                        }
+                        .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                        .offset(x: -origin.x, y: -origin.y)
+                        .zIndex(500)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+                }
+        }
+        .frame(width: 82, height: 58)
+    }
+
+    private var referenceButton: some View {
         Button {
             if slot.hasImage {
-                showPreview = true
+                if let onPreview {
+                    onPreview()
+                } else {
+                    withAnimation(.smooth(duration: 0.2)) {
+                        showPreview = true
+                    }
+                }
             }
         } label: {
-            Label(slot.hasImage ? "View style photo" : "No image", systemImage: slot.hasImage ? "photo.fill" : "photo")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(slot.hasImage ? PetTheme.coral : PetTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(slot.hasImage ? PetTheme.apricot.opacity(0.35) : Color.gray.opacity(0.12))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(slot.hasImage ? PetTheme.coral.opacity(0.25) : Color.gray.opacity(0.16), lineWidth: 1)
-                )
+            ZStack {
+                if let data = slot.thumbnailDisplayData, let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 82, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    VStack {
+                        Spacer()
+                        Text("Reference")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.28), in: Capsule())
+                            .padding(5)
+                    }
+                } else {
+                    VStack(spacing: 5) {
+                        Image(systemName: "photo")
+                            .font(.headline.weight(.semibold))
+                        Text("No photo")
+                            .font(.caption2.weight(.bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                    .foregroundStyle(PetTheme.muted)
+                }
+            }
+            .frame(width: 82, height: 58)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(slot.hasImage ? PetTheme.apricot.opacity(0.34) : Color.gray.opacity(0.11))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(slot.hasImage ? PetTheme.coral.opacity(0.25) : Color.gray.opacity(0.16), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .disabled(!slot.hasImage)
-        .sheet(isPresented: $showPreview) {
-            StyleReferencePreviewView(slot: slot)
-        }
     }
 }
 
-struct StyleReferencePreviewView: View {
-    @Environment(\.dismiss) private var dismiss
+struct StyleReferencePreviewOverlay: View {
+    @State private var showSaveAlert = false
+    @State private var saveAlertTitle = ""
+    @State private var saveAlertMessage = ""
 
     let slot: GroomingTaskReferenceImageSlot
+    let onDismiss: () -> Void
+
+    private let cardWidth: CGFloat = 330
+    private let horizontalPadding: CGFloat = 14
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                PetTheme.cream.ignoresSafeArea()
+        ZStack {
+            Color.black.opacity(0.26)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
 
-                if let image = previewImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .padding(18)
-                } else {
-                    EmptyState(title: "No image", message: "This task card does not include a style reference photo.", systemImage: "photo")
+            let imageWidth = cardWidth - horizontalPadding * 2
+            let imageHeight = previewImage.map { previewHeight(for: $0, width: imageWidth) } ?? 320
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Style reference")
+                        .font(.headline.weight(.bold))
+                        .fontDesign(.rounded)
+                        .foregroundStyle(PetTheme.ink)
+                    Spacer()
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PetTheme.muted)
+                            .frame(width: 30, height: 30)
+                            .background(PetTheme.porcelain, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close style reference preview")
                 }
+
+                Group {
+                    if let image = previewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        EmptyState(title: "No image", message: "This task card does not include a style reference photo.", systemImage: "photo")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: imageHeight)
+                .background(.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Button {
+                    saveToPhotoLibrary()
+                } label: {
+                    Label("保存到相册", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(CoralButtonStyle())
+                .disabled(previewImage == nil)
             }
-            .navigationTitle("Style Reference")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
+            .padding(horizontalPadding)
+            .frame(width: cardWidth)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.6), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.14), radius: 22, x: 0, y: 12)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .alert(saveAlertTitle, isPresented: $showSaveAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if !saveAlertMessage.isEmpty {
+                Text(saveAlertMessage)
             }
         }
     }
 
     private var previewImage: UIImage? {
-        guard let data = slot.imageData else { return nil }
+        guard let data = slot.previewDisplayData else { return nil }
         return UIImage(data: data)
+    }
+
+    private func previewHeight(for image: UIImage, width: CGFloat) -> CGFloat {
+        guard image.size.width > 0, image.size.height > 0 else { return 320 }
+        let fittedHeight = width * image.size.height / image.size.width
+        return min(fittedHeight, width * 2)
+    }
+
+    private func saveToPhotoLibrary() {
+        guard let image = previewImage else {
+            presentSaveAlert(title: "No image", message: "This task card does not include a style reference photo.")
+            return
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                presentSaveAlert(title: "Photo Access Needed", message: "Allow photo library access in Settings to save this image.")
+                return
+            }
+
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { success, error in
+                if success {
+                    presentSaveAlert(title: "Saved", message: "The style reference photo was saved to your album.")
+                } else {
+                    presentSaveAlert(title: "Save Failed", message: error?.localizedDescription ?? "Please try again.")
+                }
+            }
+        }
+    }
+
+    private func presentSaveAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            saveAlertTitle = title
+            saveAlertMessage = message
+            showSaveAlert = true
+        }
     }
 }
 
@@ -1088,7 +1701,7 @@ struct TaskAddressPickerView: View {
         NavigationStack {
             Group {
                 if showsManualEntry {
-                    ManualAddressEntryView(initialAddress: manualAddress) { address in
+                    ManualAddressEntryView(initialAddress: manualAddress) { address, _ in
                         manualAddress = address
                         selectedSource = .manualEntry
                         dismiss()
@@ -1099,7 +1712,7 @@ struct TaskAddressPickerView: View {
                     addressOptions
                 }
             }
-            .navigationTitle("Task address")
+            .navigationTitle("Task start")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !showsManualEntry {
@@ -1125,8 +1738,8 @@ struct TaskAddressPickerView: View {
                 }
 
                 addressOption(
-                    title: "Saved Profile Address",
-                    subtitle: savedAddress.isEmpty ? "Add an address from Account first" : savedAddress.compactTitle,
+                    title: "Home Address",
+                    subtitle: savedAddress.isEmpty ? "Add a home address from Account first" : savedAddress.compactTitle,
                     icon: "house.fill",
                     isSelected: selectedSource == .savedProfileAddress
                 ) {
@@ -1137,7 +1750,7 @@ struct TaskAddressPickerView: View {
                 .opacity(savedAddress.isEmpty ? 0.55 : 1)
 
                 addressOption(
-                    title: manualAddress.isEmpty ? "Enter a New Address" : "Manual Address",
+                    title: manualAddress.isEmpty ? "Enter a New Address" : "New Address",
                     subtitle: manualAddress.isEmpty ? "Use address search or standard address fields" : manualAddress.compactTitle,
                     icon: "mappin.and.ellipse",
                     isSelected: selectedSource == .manualEntry
@@ -1184,12 +1797,15 @@ struct ManualAddressEntryView: View {
     @StateObject private var completer = AddressSearchCompleter()
     @State private var draft: ProfileAddress
     @State private var isResolvingSuggestion = false
+    @State private var shouldUpdateHomeAddress = false
 
-    let onSave: (ProfileAddress) -> Void
+    var showsHomeAddressToggle = true
+    let onSave: (ProfileAddress, Bool) -> Void
     let onCancel: () -> Void
 
-    init(initialAddress: ProfileAddress, onSave: @escaping (ProfileAddress) -> Void, onCancel: @escaping () -> Void) {
+    init(initialAddress: ProfileAddress, showsHomeAddressToggle: Bool = true, onSave: @escaping (ProfileAddress, Bool) -> Void, onCancel: @escaping () -> Void) {
         _draft = State(initialValue: initialAddress.isEmpty ? .empty : initialAddress)
+        self.showsHomeAddressToggle = showsHomeAddressToggle
         self.onSave = onSave
         self.onCancel = onCancel
     }
@@ -1202,88 +1818,178 @@ struct ManualAddressEntryView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Search address")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(PetTheme.muted)
-                    TextField("Street address, city, ZIP", text: $completer.query)
-                        .textInputAutocapitalization(.words)
-                        .padding(12)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Add New Address")
+                            .font(.title2.weight(.bold))
+                            .fontDesign(.rounded)
+                            .foregroundStyle(PetTheme.ink)
+                        Text("Search first, then confirm the standard address fields.")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PetTheme.muted)
+                    }
 
-                if isResolvingSuggestion {
-                    Label("Loading address details", systemImage: "location.magnifyingglass")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PetTheme.muted)
-                }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Address search")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(PetTheme.muted)
+                        LimitedTextField("Street address, city, ZIP", text: $completer.query, limit: 120)
+                            .textInputAutocapitalization(.words)
+                            .padding(12)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(PetTheme.line.opacity(0.48), lineWidth: 1)
+                            )
 
-                if !completer.results.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(Array(completer.results.prefix(5).enumerated()), id: \.offset) { _, result in
-                            Button {
-                                apply(result)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(result.title)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(PetTheme.ink)
-                                    if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(PetTheme.muted)
+                        if isResolvingSuggestion {
+                            Label("Loading address details", systemImage: "location.magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PetTheme.muted)
+                        }
+
+                        if !completer.results.isEmpty {
+                            VStack(spacing: 7) {
+                                ForEach(Array(completer.results.prefix(4).enumerated()), id: \.offset) { _, result in
+                                    Button {
+                                        apply(result)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(result.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(PetTheme.ink)
+                                            if !result.subtitle.isEmpty {
+                                                Text(result.subtitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(PetTheme.muted)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(10)
+                                        .background(PetTheme.cream.opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     }
+                                    .buttonStyle(.plain)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(11)
-                                .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
-                            .buttonStyle(.plain)
                         }
                     }
-                }
+                    .taskCard()
 
-                VStack(spacing: 10) {
-                    addressTextField("Street address", text: $draft.streetLine1)
-                    addressTextField("Apt, suite, unit", text: $draft.streetLine2)
-                    addressTextField("City", text: $draft.city)
-                    HStack(spacing: 10) {
-                        addressTextField("State", text: $draft.state)
-                        addressTextField("ZIP", text: $draft.postalCode)
-                    }
-                    addressTextField("Country", text: $draft.country)
-                }
+                    VStack(spacing: 10) {
+                        addressTextField("Address line 1", text: $draft.streetLine1)
+                        addressTextField("Address line 2", text: $draft.streetLine2)
+                        addressTextField("City", text: $draft.city)
 
-                HStack(spacing: 10) {
-                    Button("Cancel") {
-                        onCancel()
+                        HStack(spacing: 10) {
+                            statePicker
+                            addressTextField("ZIP code", text: $draft.postalCode)
+                                .keyboardType(.numbersAndPunctuation)
+                        }
                     }
-                    .buttonStyle(QuietButtonStyle())
+                    .taskCard()
+
+                    if showsHomeAddressToggle {
+                        Button {
+                            shouldUpdateHomeAddress.toggle()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: shouldUpdateHomeAddress ? "checkmark.square.fill" : "square")
+                                    .foregroundStyle(shouldUpdateHomeAddress ? PetTheme.coral : PetTheme.muted)
+                                Text("Update existing home address")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(PetTheme.ink)
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     Button {
-                        onSave(cleaned(draft))
+                        onSave(cleaned(draft), shouldUpdateHomeAddress)
                     } label: {
-                        Label("Use Address", systemImage: "checkmark.circle.fill")
+                        Label("Add Address", systemImage: "plus.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(CoralButtonStyle())
                     .disabled(!canSave)
                     .opacity(canSave ? 1 : 0.55)
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .appBackground()
+            .navigationTitle("Add New Address")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
         }
-        .appBackground()
     }
 
     private func addressTextField(_ title: String, text: Binding<String>) -> some View {
-        TextField(title, text: text)
-            .textInputAutocapitalization(.words)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            LimitedTextField(title, text: text, limit: addressLimit(for: title))
+                .textInputAutocapitalization(.words)
+                .padding(12)
+                .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(PetTheme.line.opacity(0.48), lineWidth: 1)
+                )
+        }
+    }
+
+    private var statePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("State")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(PetTheme.muted)
+            Picker("State", selection: $draft.state) {
+                Text("State").tag("")
+                ForEach(usStates, id: \.self) { state in
+                    Text(state).tag(state)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.48), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func addressLimit(for title: String) -> Int {
+        switch title {
+        case "Address line 1": 80
+        case "Address line 2": 60
+        case "City": 50
+        case "ZIP code": 12
+        default: 80
+        }
+    }
+
+    private func cleaned(_ address: ProfileAddress) -> ProfileAddress {
+        ProfileAddress(
+            streetLine1: address.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines),
+            streetLine2: address.streetLine2.trimmingCharacters(in: .whitespacesAndNewlines),
+            city: address.city.trimmingCharacters(in: .whitespacesAndNewlines),
+            state: address.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            postalCode: address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            country: "United States"
+        )
     }
 
     private func apply(_ completion: MKLocalSearchCompletion) {
@@ -1312,7 +2018,7 @@ struct ManualAddressEntryView: View {
                         city: placemark.locality ?? "",
                         state: placemark.administrativeArea ?? "",
                         postalCode: placemark.postalCode ?? "",
-                        country: placemark.country ?? "United States"
+                        country: "United States"
                     )
                 )
             }
@@ -1336,16 +2042,10 @@ struct ManualAddressEntryView: View {
         )
     }
 
-    private func cleaned(_ address: ProfileAddress) -> ProfileAddress {
-        ProfileAddress(
-            streetLine1: address.streetLine1.trimmingCharacters(in: .whitespacesAndNewlines),
-            streetLine2: address.streetLine2.trimmingCharacters(in: .whitespacesAndNewlines),
-            city: address.city.trimmingCharacters(in: .whitespacesAndNewlines),
-            state: address.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-            postalCode: address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
-            country: address.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "United States" : address.country.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+    private var usStates: [String] {
+        ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"]
     }
+
 }
 
 final class AddressSearchCompleter: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
@@ -1378,70 +2078,103 @@ final class AddressSearchCompleter: NSObject, ObservableObject, MKLocalSearchCom
     }
 }
 
+final class CurrentLocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var currentAddress: ProfileAddress?
+
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    func requestCurrentLocation() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+            manager.requestLocation()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+            guard let placemark = placemarks?.first else { return }
+            DispatchQueue.main.async {
+                self?.currentAddress = ProfileAddress(
+                    streetLine1: [placemark.subThoroughfare, placemark.thoroughfare].compactMap { $0 }.joined(separator: " "),
+                    streetLine2: "",
+                    city: placemark.locality ?? "",
+                    state: placemark.administrativeArea ?? "",
+                    postalCode: placemark.postalCode ?? "",
+                    country: placemark.country ?? "United States"
+                )
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        currentAddress = nil
+    }
+}
+
 struct SearchView: View {
     @EnvironmentObject private var model: AppModel
     @State private var query = ""
-    @State private var city = "All"
-    @State private var verifiedOnly = false
-    @State private var catsOnly = false
-
-    private var cities: [String] {
-        ["All"] + Array(Set(model.groomers.map(\.city))).sorted()
-    }
+    @State private var savedOnly = false
+    @State private var selectedGroomerForDetails: Groomer?
+    @State private var showMissingTaskCardAlert = false
 
     private var results: [Groomer] {
-        model.filteredGroomers(query: query, city: city, verifiedOnly: verifiedOnly, acceptsCatsOnly: catsOnly)
+        let groomers = model.filteredGroomers(query: query, city: "All", verifiedOnly: false, acceptsCatsOnly: false)
+        guard savedOnly else { return groomers }
+        return groomers.filter { model.isFavorite(targetType: .groomer, targetID: $0.id) }
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                ScreenTitle(title: "Search groomers", subtitle: "Filter by location, pet type, verification, specialties, and portfolio fit.")
+            VStack(spacing: 13) {
+                searchHeader
 
-                VStack(spacing: 12) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(PetTheme.muted)
-                        TextField("Breed, style, city, specialty", text: $query)
-                            .textInputAutocapitalization(.never)
-                    }
-                    .padding(12)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    Picker("City", selection: $city) {
-                        ForEach(cities, id: \.self) { city in
-                            Text(city).tag(city)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    HStack {
-                        Toggle("Verified", isOn: $verifiedOnly)
-                        Toggle("Cats", isOn: $catsOnly)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .tint(PetTheme.sage)
-                }
-                .taskCard()
-                .padding(.horizontal, 18)
+                searchFilterCard
 
                 if results.isEmpty {
-                    EmptyState(title: "No groomers match", message: "Adjust filters or search a broader service area.", systemImage: "slider.horizontal.3")
+                    EmptyState(
+                        title: savedOnly ? "No saved groomers match" : "No groomers match",
+                        message: savedOnly ? "Turn off saved-only or save more groomers from the list." : "Try a name, city, style, or specialty.",
+                        systemImage: savedOnly ? "heart" : "magnifyingglass"
+                    )
                 } else {
                     VStack(spacing: 14) {
                         ForEach(results) { groomer in
-                            NavigationLink {
-                                GroomerProfileView(groomer: groomer)
-                            } label: {
-                                GroomerCard(
-                                    groomer: groomer,
-                                    portfolio: model.portfolio(for: groomer),
-                                    isSaved: model.isFavorite(targetType: .groomer, targetID: groomer.id),
-                                    onSave: { model.toggleFavorite(targetType: .groomer, targetID: groomer.id) },
-                                    onContact: { model.logContact(groomer: groomer, pet: model.pets.first, method: .quoteRequest) }
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            let mismatchReasons = taskMismatchReasons(for: groomer)
+                            GroomerCard(
+                                groomer: groomer,
+                                portfolio: model.portfolio(for: groomer),
+                                isSaved: model.isFavorite(targetType: .groomer, targetID: groomer.id),
+                                onSave: { model.toggleFavorite(targetType: .groomer, targetID: groomer.id) },
+                                onContact: { sendOrAskForTaskCard(to: groomer) },
+                                contactTitle: contactTitle(for: groomer),
+                                contactIcon: contactIcon(for: groomer),
+                                isContactDisabled: contactIsDisabled(for: groomer),
+                                contactMismatchReasons: mismatchReasons,
+                                secondaryTitle: "Details",
+                                secondaryIcon: "person.text.rectangle",
+                                onSecondaryAction: { selectedGroomerForDetails = groomer }
+                            )
                             .padding(.horizontal, 18)
                         }
                     }
@@ -1450,16 +2183,181 @@ struct SearchView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    SavedView()
-                } label: {
-                    Label("Saved", systemImage: "heart.fill")
-                }
-                .accessibilityLabel("Open saved groomers and portfolio")
-            }
+        .navigationDestination(item: $selectedGroomerForDetails) { groomer in
+            GroomerProfileView(groomer: groomer)
         }
+        .alert("No task card yet", isPresented: $showMissingTaskCardAlert) {
+            Button("Create Now") {
+                model.shouldReturnToSearchAfterTaskCreation = true
+                model.selectedAppTab = "home"
+            }
+            Button("Not Now", role: .cancel) { }
+        } message: {
+            Text("Create this visit’s task card first, then send it to a groomer from Search.")
+        }
+        .customerChatToolbar()
+    }
+
+    private var searchHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search groomers")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(PetTheme.ink)
+
+            Text(model.currentGroomingTask == nil ? "Create a task card first, then send it from any profile." : "Browse profiles and send your current task card.")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(PetTheme.muted)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [PetTheme.porcelain, PetTheme.apricot.opacity(0.44)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.045), radius: 10, x: 0, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.78), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+    }
+
+    private var searchFilterCard: some View {
+        VStack(spacing: 9) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(PetTheme.coral)
+                    .frame(width: 24, height: 24)
+                    .background(PetTheme.apricot.opacity(0.28), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                LimitedTextField("Breed, style, city, specialty", text: $query, limit: 80)
+                    .font(.subheadline.weight(.semibold))
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(PetTheme.muted.opacity(0.72))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 11)
+            .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(PetTheme.line.opacity(0.42), lineWidth: 1)
+            )
+
+            Button {
+                withAnimation(.smooth(duration: 0.22)) {
+                    savedOnly.toggle()
+                }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: savedOnly ? "heart.fill" : "heart")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(savedOnly ? .white : PetTheme.coral)
+                        .frame(width: 24, height: 24)
+                        .background(savedOnly ? PetTheme.coral : PetTheme.apricot.opacity(0.28), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Text("Saved groomers only")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(PetTheme.ink)
+                    Spacer()
+                    Text(savedOnly ? "On" : "Off")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(savedOnly ? PetTheme.coralDark : PetTheme.muted)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background(savedOnly ? PetTheme.apricot.opacity(0.22) : .white.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(savedOnly ? PetTheme.coral.opacity(0.26) : PetTheme.line.opacity(0.36), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(PetTheme.porcelain, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(PetTheme.line.opacity(0.72), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+    }
+
+    private func sendOrAskForTaskCard(to groomer: Groomer) {
+        guard let task = model.currentGroomingTask else {
+            showMissingTaskCardAlert = true
+            return
+        }
+
+        if let pendingSubmission = model.pendingTaskSubmission(for: task, groomer: groomer) {
+            model.revokeTaskSubmission(id: pendingSubmission.id)
+        } else {
+            model.sendCurrentTask(to: groomer)
+        }
+    }
+
+    private func contactTitle(for groomer: Groomer) -> String {
+        guard let task = model.currentGroomingTask else { return "Send Card" }
+        if !model.taskMismatchReasons(for: task, groomer: groomer).isEmpty {
+            return "Unavailable"
+        }
+        if let pendingSubmission = model.pendingTaskSubmission(for: task, groomer: groomer), pendingSubmission.status == .sent {
+            return "Revoke"
+        }
+        if let submission = model.taskSubmission(for: task, groomer: groomer), submission.status == .accepted {
+            return "Accepted"
+        }
+        return "Send Card"
+    }
+
+    private func contactIcon(for groomer: Groomer) -> String {
+        guard let task = model.currentGroomingTask else { return "paperplane.fill" }
+        if !model.taskMismatchReasons(for: task, groomer: groomer).isEmpty {
+            return "slash.circle.fill"
+        }
+        if model.pendingTaskSubmission(for: task, groomer: groomer) != nil {
+            return "arrow.uturn.backward.circle.fill"
+        }
+        if let submission = model.taskSubmission(for: task, groomer: groomer), submission.status == .accepted {
+            return "checkmark.seal.fill"
+        }
+        return "paperplane.fill"
+    }
+
+    private func contactIsDisabled(for groomer: Groomer) -> Bool {
+        guard let task = model.currentGroomingTask else {
+            return false
+        }
+        if !model.taskMismatchReasons(for: task, groomer: groomer).isEmpty {
+            return true
+        }
+        guard let submission = model.taskSubmission(for: task, groomer: groomer) else {
+            return false
+        }
+        return submission.status == .accepted || submission.status == .completed
+    }
+
+    private func taskMismatchReasons(for groomer: Groomer) -> [String] {
+        guard let task = model.currentGroomingTask else { return [] }
+        return model.taskMismatchReasons(for: task, groomer: groomer)
     }
 }
 
@@ -1469,7 +2367,7 @@ struct SavedView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ScreenTitle(title: "Saved", subtitle: "Keep groomers and portfolio references for your next quote request.")
+                ScreenTitle(title: "Saved", subtitle: "Keep groomers and portfolio looks for later.")
 
                 if model.savedGroomers.isEmpty && model.savedPortfolio.isEmpty {
                     EmptyState(title: "Nothing saved yet", message: "Save groomers or portfolio looks as you browse.", systemImage: "heart")
@@ -1514,6 +2412,7 @@ struct SavedView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .customerChatToolbar()
     }
 }
 
@@ -1527,7 +2426,7 @@ struct OrdersView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                ScreenTitle(title: "Orders", subtitle: "Task-card orders created from cards you have sent to groomers.")
+                ScreenTitle(title: "Orders", subtitle: "Track sent task cards and groomer replies.")
 
                 if orders.isEmpty {
                     EmptyState(
@@ -1556,6 +2455,7 @@ struct OrdersView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .customerChatToolbar()
     }
 }
 
@@ -1654,7 +2554,7 @@ struct CustomerOrderDetailView: View {
                 let groomer = model.groomer(for: order)
 
                 VStack(spacing: 16) {
-                    ScreenTitle(title: "Order details", subtitle: "This order links your sent task-card package with the groomer public card.")
+                    ScreenTitle(title: "Order details", subtitle: "Review the task, groomer, status, and chat.")
 
                     VStack(alignment: .leading, spacing: 13) {
                         HStack(alignment: .top) {
@@ -1723,6 +2623,7 @@ struct CustomerOrderDetailView: View {
             }
         }
         .appBackground()
+        .customerChatToolbar()
         .navigationTitle("Order")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1760,7 +2661,7 @@ struct AccountView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ScreenTitle(title: "Account", subtitle: "Demo profile, settings, and MVP feature flags.")
+                ScreenTitle(title: "Account", subtitle: "Manage your profile, role, and app settings.")
 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
@@ -1800,7 +2701,7 @@ struct AccountView: View {
                     }
 
                     Divider()
-                    Label("No platform payment, booking calendar, or real-time chat in MVP", systemImage: "checklist")
+                    Label("Payments, calendar booking, and live chat are not enabled", systemImage: "checklist")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(PetTheme.muted)
                 }
@@ -1811,7 +2712,7 @@ struct AccountView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     profileRow("Name", value: model.customerPersonalProfile.fullName, icon: "person.fill")
                     profileRow("Gender", value: model.customerPersonalProfile.gender.rawValue, icon: "person.text.rectangle")
-                    profileRow("Address", value: model.customerPersonalProfile.address.formattedAddress, icon: "house.fill")
+                    profileRow("Home address", value: model.customerPersonalProfile.address.formattedAddress, icon: "house.fill")
                     profileRow("Phone", value: model.customerPersonalProfile.phone, icon: "phone.fill")
                     profileRow("Email", value: model.customerPersonalProfile.email, icon: "envelope.fill")
 
@@ -1854,6 +2755,7 @@ struct AccountView: View {
             .padding(.bottom, 28)
         }
         .appBackground()
+        .roleAwareChatToolbar()
         .sheet(isPresented: $showPersonalProfileEditor) {
             CustomerPersonalProfileEditorView(profile: model.customerPersonalProfile) { profile in
                 model.updateCustomerPersonalProfile(profile)
@@ -1882,6 +2784,7 @@ struct AccountView: View {
 struct CustomerPersonalProfileEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: CustomerPersonalProfile
+    @State private var showHomeAddressEditor = false
 
     let onSave: (CustomerPersonalProfile) -> Void
 
@@ -1911,14 +2814,25 @@ struct CustomerPersonalProfileEditorView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
-                    profileTextField("Street address", text: $draft.address.streetLine1)
-                    profileTextField("Apt, suite, unit", text: $draft.address.streetLine2)
-                    profileTextField("City", text: $draft.address.city)
-                    HStack(spacing: 10) {
-                        profileTextField("State", text: $draft.address.state)
-                        profileTextField("ZIP", text: $draft.address.postalCode)
+                    SectionHeader(title: "Home address")
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !draft.address.isEmpty {
+                            Text(draft.address.formattedAddress)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(PetTheme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Button {
+                            showHomeAddressEditor = true
+                        } label: {
+                            Label(draft.address.isEmpty ? "Add Address" : "Update Address", systemImage: draft.address.isEmpty ? "plus.circle.fill" : "pencil.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(QuietButtonStyle())
                     }
-                    profileTextField("Country", text: $draft.address.country)
+                    .taskCard()
+
                     profileTextField("Phone", text: $draft.phone)
                         .keyboardType(.phonePad)
                     profileTextField("Email", text: $draft.email)
@@ -1943,6 +2857,16 @@ struct CustomerPersonalProfileEditorView: View {
                 }
             }
         }
+        .sheet(isPresented: $showHomeAddressEditor) {
+            ManualAddressEntryView(initialAddress: draft.address, showsHomeAddressToggle: false) { address, _ in
+                draft.address = address
+                showHomeAddressEditor = false
+            } onCancel: {
+                showHomeAddressEditor = false
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func profileTextField(_ title: String, text: Binding<String>) -> some View {
@@ -1950,10 +2874,19 @@ struct CustomerPersonalProfileEditorView: View {
             Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(PetTheme.muted)
-            TextField(title, text: text)
+            LimitedTextField(title, text: text, limit: profileLimit(for: title))
                 .textInputAutocapitalization(.words)
                 .padding(12)
                 .background(.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func profileLimit(for title: String) -> Int {
+        switch title {
+        case "Name": 60
+        case "Phone": 24
+        case "Email": 120
+        default: 80
         }
     }
 
@@ -1968,7 +2901,7 @@ struct CustomerPersonalProfileEditorView: View {
             city: profile.address.city.trimmingCharacters(in: .whitespacesAndNewlines),
             state: profile.address.state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
             postalCode: profile.address.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
-            country: profile.address.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "United States" : profile.address.country.trimmingCharacters(in: .whitespacesAndNewlines)
+            country: "United States"
         )
         return cleanedProfile
     }
